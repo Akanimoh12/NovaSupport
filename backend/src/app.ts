@@ -120,8 +120,9 @@ export function createApp(customLogger?: Logger) {
     }
   }
 
-  // Cleanup expired challenges every minute
-  setInterval(cleanupExpiredChallenges, 60000);
+  // Cleanup expired challenges every minute without keeping the event loop alive in tests.
+  const challengeCleanupInterval = setInterval(cleanupExpiredChallenges, 60000);
+  challengeCleanupInterval.unref();
 
   const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? "http://localhost:3000")
     .split(",")
