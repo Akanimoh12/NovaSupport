@@ -421,12 +421,14 @@ async function main() {
     assert.ok(changed, "Expected changed to be true");
   });
 
-  // Test 18: sanitizeBody middleware mutates req.body in place
+  // Test 18: sanitizeBody middleware strips XSS payload from request body
   await runTest("sanitizeBody middleware strips XSS payload from request body", async () => {
     const req = {
       body: { bio: "<script>evil()</script>Hello", displayName: "  World  " },
       method: "POST",
       path: "/test",
+      ip: "127.0.0.1",
+      get: () => "test-agent",
     } as unknown as Parameters<typeof sanitizeBody>[0];
     const res = {} as Parameters<typeof sanitizeBody>[1];
     await new Promise<void>((resolve) => sanitizeBody(req, res, resolve as Parameters<typeof sanitizeBody>[2]));
@@ -440,6 +442,8 @@ async function main() {
       query: { q: "  search term  ", page: "1" },
       method: "GET",
       path: "/profiles",
+      ip: "127.0.0.1",
+      get: () => "test-agent",
     } as unknown as Parameters<typeof sanitizeQuery>[0];
     const res = {} as Parameters<typeof sanitizeQuery>[1];
     await new Promise<void>((resolve) => sanitizeQuery(req, res, resolve as Parameters<typeof sanitizeQuery>[2]));
@@ -447,7 +451,96 @@ async function main() {
     assert.equal((req.query as Record<string, string>).page, "1");
   });
 
-  // Test 20: sanitizeObject leaves non-string values unchanged
+  // Test 20: URL sanitization and validation
+  await runTest("sanitizeString normalizes and validates URLs", async () => {
+    // Valid URL normalization
+    const { result: result1 } = sanitizeString("websiteUrl", "example.com");
+    assert.equal(result1, "https://example.com/");
+
+    // Invalid protocol blocked
+    const { result: result2 } = sanitizeString("websiteUrl", "ftp://example.com");
+    assert.equal(result2, "");
+
+    // Private IP blocked
+    const { result: result3 } = sanitizeString("websiteUrl", "http://192.168.1.1");
+    assert.equal(result3, "");
+
+    // Localhost blocked
+    const { result: result4 } = sanitizeString("websiteUrl", "http://localhost:3000");
+    assert.equal(result4, "");
+  });
+
+  // Test 21: Social handle sanitization
+  await runTest("sanitizeString validates social handles", async () => {
+    // Twitter handle validation
+    const { result: twitter1 } = sanitizeString("twitterHandle", "@john_doe123");
+    assert.equal(twitter1, "john_doe123");
+
+    // Invalid Twitter handle
+    const { result: twitter2 } = sanitizeString("twitterHandle", "invalid@handle!");
+    assert.equal(twitter2, "invalidhandle");
+
+    // GitHub handle validation
+    const { result: github1 } = sanitizeString("githubHandle", "user-name");
+    assert.equal(github1, "user-name");
+
+    // Invalid GitHub handle (starts with hyphen)
+    const { result: github2 } = sanitizeString("githubHandle", "-invalid-");
+    assert.equal(github2, "invalid");
+  });
+
+  // Test 22: Email validation and normalization
+  await runTest("sanitizeString validates and normalizes emails", async () => {
+    // Valid email normalization
+    const { result: email1 } = sanitizeString("email", "  User@Example.COM  ");
+    assert.equal(email1, "user@example.com");
+
+    // Invalid email format
+    const { result: email2, violations } = sanitizeString("email", "invalid-email");
+    assert.ok(violations.includes("Invalid email format"));
+  });
+
+  // Test 23: Length limits enforcement
+  await runTest("sanitizeString enforces maximum length limits", async () => {
+    // Bio length limit (500 chars)
+    const longBio = "a".repeat(600);
+    const { result: bio, violations } = sanitizeString("bio", longBio);
+    assert.equal(bio.length, 500);
+    assert.ok(violations.some(v => v.includes("maximum length")));
+
+    // Message length limit (280 chars)
+    const longMessage = "b".repeat(300);
+    const { result: message } = sanitizeString("message", longMessage);
+    assert.equal(message.length, 280);
+  });
+
+  // Test 24: Control character removal
+  await runTest("sanitizeString removes control characters", async () => {
+    const input = "Hello\x00\x01World\x7F";
+    const { result, violations } = sanitizeString("displayName", input);
+    assert.equal(result, "HelloWorld");
+    assert.ok(violations.includes("Control characters removed"));
+  });
+
+  // Test 25: Unicode normalization
+  await runTest("sanitizeString normalizes Unicode", async () => {
+    // Using combining characters that should be normalized
+    const input = "e\u0301"; // e + combining acute accent
+    const { result, violations } = sanitizeString("displayName", input);
+    assert.equal(result, "é"); // normalized form
+    assert.ok(violations.includes("Unicode normalized"));
+  });
+
+  // Test 26: Lowercase field transformation
+  await runTest("sanitizeString converts specified fields to lowercase", async () => {
+    const { result: username } = sanitizeString("username", "UserName123");
+    assert.equal(username, "username123");
+
+    const { result: email } = sanitizeString("email", "User@Example.COM");
+    assert.equal(email, "user@example.com");
+  });
+
+  // Test 27: sanitizeObject leaves non-string values unchanged
   await runTest("sanitizeObject leaves non-string values unchanged", async () => {
     const input = { count: 42, active: true, tags: ["a", "b"], nested: null };
     const { result, changed } = sanitizeObject(input);
@@ -455,10 +548,7 @@ async function main() {
     assert.ok(!changed, "Expected no changes for non-string primitives");
   });
 
-  // ── #273: Advanced XSS prevention coverage ────────────────────────────────
-
-  // Each entry is a payload + the substring that MUST NOT remain in the
-  // sanitized output. Keeps adding new vectors trivially: append a row.
+  // Test 28: Comprehensive XSS prevention
   const xssVectors: Array<{ name: string; payload: string; mustNotContain: string[] }> = [
     {
       name: "data: URI image",
@@ -482,8 +572,6 @@ async function main() {
     },
     {
       name: "broken-tag fallback (<scr<script>ipt>)",
-      // The point of this case is that no executable <script> survives;
-      // residual `alert(1)` *text* is harmless (it's not JS without tags).
       payload: "<scr<script>ipt>alert(1)</scr</script>ipt>final",
       mustNotContain: ["<script"],
     },
@@ -527,9 +615,7 @@ async function main() {
     );
   }
 
-  // sanitizeBody covers nested objects exactly the way the /profiles
-  // creation endpoint receives them — pin the contract end-to-end so a
-  // future refactor of the route can't accidentally bypass sanitization.
+  // Test 29: Comprehensive middleware integration test
   await runTest(
     "sanitizeBody strips XSS from nested profile.bio + supportTransaction.message payloads",
     async () => {
@@ -538,6 +624,9 @@ async function main() {
           profile: {
             bio: "<script>steal()</script>Hi everyone",
             displayName: "<b>Alice</b>",
+            websiteUrl: "example.com",
+            twitterHandle: "@alice123",
+            email: "  Alice@Example.COM  ",
           },
           supportTransaction: {
             message: "<img src=x onerror=alert(1)>thanks!",
@@ -545,6 +634,8 @@ async function main() {
         },
         method: "POST",
         path: "/profiles",
+        ip: "127.0.0.1",
+        get: () => "test-agent",
       } as unknown as Parameters<typeof sanitizeBody>[0];
       const res = {} as Parameters<typeof sanitizeBody>[1];
       await new Promise<void>((resolve) =>
@@ -553,9 +644,41 @@ async function main() {
       const body = req.body as Record<string, Record<string, string>>;
       assert.equal(body.profile.bio, "Hi everyone");
       assert.equal(body.profile.displayName, "Alice");
+      assert.equal(body.profile.websiteUrl, "https://example.com/");
+      assert.equal(body.profile.twitterHandle, "alice123");
+      assert.equal(body.profile.email, "alice@example.com");
       assert.equal(body.supportTransaction.message, "thanks!");
     },
   );
+
+  // Test 30: Suspicious domain blocking
+  await runTest("sanitizeString blocks suspicious domains", async () => {
+    const { result: result1 } = sanitizeString("websiteUrl", "http://example.tk");
+    assert.equal(result1, "");
+
+    const { result: result2 } = sanitizeString("websiteUrl", "https://test.ml");
+    assert.equal(result2, "");
+  });
+
+  // Test 31: Array sanitization in query parameters
+  await runTest("sanitizeQuery handles arrays with sanitization", async () => {
+    const req = {
+      query: { 
+        tags: ["  tag1  ", "<script>tag2</script>", "tag3"],
+        single: "  value  "
+      },
+      method: "GET",
+      path: "/search",
+      ip: "127.0.0.1",
+      get: () => "test-agent",
+    } as unknown as Parameters<typeof sanitizeQuery>[0];
+    const res = {} as Parameters<typeof sanitizeQuery>[1];
+    await new Promise<void>((resolve) => sanitizeQuery(req, res, resolve as Parameters<typeof sanitizeQuery>[2]));
+    
+    const query = req.query as Record<string, unknown>;
+    assert.deepEqual(query.tags, ["tag1", "tag2", "tag3"]);
+    assert.equal(query.single, "value");
+  });
 
   if (hasDb) await prisma.$disconnect();
 }
