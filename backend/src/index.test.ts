@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
+import { Keypair } from "@stellar/stellar-sdk";
 import { app } from "./app.js";
 import { prisma } from "./db.js";
-import { signJWT } from "./auth.js";
+import { signJWT, generateChallenge, verifySignature } from "./auth.js";
 
 const baseUsername = "stellar-dev";
 const seedEmail = "builder@novasupport.dev";
@@ -718,6 +719,150 @@ async function main() {
         response.headers.get("ratelimit-remaining") !== null,
         "Expected ratelimit-remaining header to be present"
       );
+    });
+
+    // ── Auth Flow Integration Tests (Issue #282) ─────────────────────────
+
+    await runTest("auth flow: complete challenge-sign-verify-JWT flow", async () => {
+      // 1. Generate a new keypair (simulating a user's wallet)
+      const keypair = Keypair.random();
+      const testWalletAddress = keypair.publicKey();
+
+      // 2. Generate a challenge
+      const challenge = generateChallenge(testWalletAddress);
+      assert.ok(challenge.includes(testWalletAddress), "Challenge should include wallet address");
+
+      // 3. Sign the challenge
+      const messageBuffer = Buffer.from(challenge, "utf8");
+      const signature = keypair.sign(messageBuffer).toString("base64");
+
+      // 4. Verify the signature
+      const isValidSignature = verifySignature(testWalletAddress, challenge, signature);
+      assert.ok(isValidSignature, "Signature should be valid");
+
+      // 5. Issue a JWT
+      const token = signJWT(testWalletAddress);
+      assert.ok(typeof token === "string", "Token should be issued");
+
+      // 6. Use the JWT to access a protected endpoint
+      const response = await fetch(`${baseUrl}/profiles`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          username: `auth-test-${randomUUID().slice(0, 8)}`,
+          displayName: "Auth Test User",
+          walletAddress: testWalletAddress,
+          acceptedAssets: [{ code: "XLM" }],
+        }),
+      });
+
+      assert.equal(response.status, 201, "Should be able to create profile with valid JWT");
+    });
+
+    await runTest("auth flow: rejects invalid signature", async () => {
+      const keypair1 = Keypair.random();
+      const keypair2 = Keypair.random();
+      const testWalletAddress = keypair1.publicKey();
+
+      const challenge = generateChallenge(testWalletAddress);
+      
+      // Sign with wrong keypair
+      const messageBuffer = Buffer.from(challenge, "utf8");
+      const wrongSignature = keypair2.sign(messageBuffer).toString("base64");
+
+      const isValidSignature = verifySignature(testWalletAddress, challenge, wrongSignature);
+      assert.equal(isValidSignature, false, "Wrong signature should fail verification");
+    });
+
+    await runTest("auth flow: protected endpoint rejects missing JWT", async () => {
+      const response = await fetch(`${baseUrl}/profiles`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          username: `no-auth-${randomUUID().slice(0, 8)}`,
+          displayName: "No Auth User",
+          walletAddress: "GCZJM35NKGVK47BB4SPBDV25477PZYIYPVVG453LPYFNXLS3FGHDXOCM",
+          acceptedAssets: [{ code: "XLM" }],
+        }),
+      });
+
+      assert.equal(response.status, 401, "Should reject request without JWT");
+      const body = await response.json();
+      assert.ok(body.error.includes("Missing or invalid token"), "Should return appropriate error");
+    });
+
+    await runTest("auth flow: protected endpoint rejects invalid JWT", async () => {
+      const response = await fetch(`${baseUrl}/profiles`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "authorization": "Bearer invalid.token.here",
+        },
+        body: JSON.stringify({
+          username: `bad-token-${randomUUID().slice(0, 8)}`,
+          displayName: "Bad Token User",
+          walletAddress: "GCZJM35NKGVK47BB4SPBDV25477PZYIYPVVG453LPYFNXLS3FGHDXOCM",
+          acceptedAssets: [{ code: "XLM" }],
+        }),
+      });
+
+      assert.equal(response.status, 401, "Should reject request with invalid JWT");
+      const body = await response.json();
+      assert.ok(body.error.includes("Invalid or expired token"), "Should return appropriate error");
+    });
+
+    await runTest("auth flow: protected endpoint rejects malformed authorization header", async () => {
+      const response = await fetch(`${baseUrl}/profiles`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "authorization": "InvalidFormat token",
+        },
+        body: JSON.stringify({
+          username: `malformed-${randomUUID().slice(0, 8)}`,
+          displayName: "Malformed Auth User",
+          walletAddress: "GCZJM35NKGVK47BB4SPBDV25477PZYIYPVVG453LPYFNXLS3FGHDXOCM",
+          acceptedAssets: [{ code: "XLM" }],
+        }),
+      });
+
+      assert.equal(response.status, 401, "Should reject request with malformed header");
+    });
+
+    await runTest("auth flow: JWT with userId can access protected endpoints", async () => {
+      const keypair = Keypair.random();
+      const testWalletAddress = keypair.publicKey();
+      
+      // Create a user first
+      const user = await prisma.user.create({
+        data: {
+          email: `auth-test-${randomUUID()}@example.com`,
+        },
+      });
+
+      // Issue JWT with userId
+      const token = signJWT(testWalletAddress, user.id);
+
+      const response = await fetch(`${baseUrl}/profiles`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          username: `userid-test-${randomUUID().slice(0, 8)}`,
+          displayName: "User ID Test",
+          walletAddress: testWalletAddress,
+          acceptedAssets: [{ code: "XLM" }],
+        }),
+      });
+
+      assert.equal(response.status, 201, "Should be able to create profile with JWT containing userId");
     });
 
   } finally {
