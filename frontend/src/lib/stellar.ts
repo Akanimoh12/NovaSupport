@@ -26,6 +26,42 @@ export function isValidStellarAddress(address: string): boolean {
   return StrKey.isValidEd25519PublicKey(address);
 }
 
+export type ValidationResult = {
+  isValid: boolean;
+  error?: string;
+};
+
+export function validateStellarAddress(address: string): ValidationResult {
+  if (!address) {
+    return { isValid: false, error: "Wallet address is required" };
+  }
+
+  if (!address.startsWith("G")) {
+    return { isValid: false, error: "Stellar public keys must start with the letter 'G'" };
+  }
+
+  if (address.length !== 56) {
+    return {
+      isValid: false,
+      error: `Address must be exactly 56 characters long (currently ${address.length})`,
+    };
+  }
+
+  // Base32 check (A-Z, 2-7)
+  if (!/^[A-Z2-7]+$/.test(address)) {
+    return {
+      isValid: false,
+      error: "Contains invalid characters (Stellar addresses only use A-Z and 2-7)",
+    };
+  }
+
+  if (!StrKey.isValidEd25519PublicKey(address)) {
+    return { isValid: false, error: "Invalid checksum — please check for typos" };
+  }
+
+  return { isValid: true };
+}
+
 // ─── #274: Stellar network failure handling ─────────────────────────────────
 //
 // Horizon calls fail in three flavours: transient network errors (timeouts,

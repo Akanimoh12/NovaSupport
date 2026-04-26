@@ -6,6 +6,7 @@ import { API_BASE_URL } from "@/lib/config";
 import { AppShell } from "@/components/app-shell";
 import { useToast } from "@/lib/use-toast";
 import { Toast } from "@/components/toast";
+import { validateStellarAddress } from "@/lib/stellar";
 
 interface FormData {
   username: string;
@@ -62,9 +63,8 @@ export default function CreatePage() {
     };
   }
 
-  const walletValid =
-    form.walletAddress === "" ||
-    /^G[A-Z0-9]{55}$/.test(form.walletAddress);
+  const walletValidation = validateStellarAddress(form.walletAddress);
+  const walletValid = form.walletAddress === "" || walletValidation.isValid;
 
   const twitterInvalid =
     form.twitterHandle !== "" &&
@@ -94,8 +94,12 @@ export default function CreatePage() {
       }
     }
     if (step === 2) {
-      if (!form.walletAddress || !walletValid) {
-        setError("Please enter a valid Stellar wallet address.");
+      if (!form.walletAddress) {
+        setError("Wallet address is required.");
+        return;
+      }
+      if (!walletValidation.isValid) {
+        setError(walletValidation.error || "Please enter a valid Stellar wallet address.");
         return;
       }
       if (form.acceptedAssets.length === 0) {
@@ -127,9 +131,9 @@ export default function CreatePage() {
       return;
     }
 
-    if (!walletValid) {
-      showToast("Please enter a valid Stellar address.", "error");
-      setError("Wallet address must be a valid Stellar public key starting with G.");
+    if (!walletValidation.isValid) {
+      showToast(walletValidation.error || "Please enter a valid Stellar address.", "error");
+      setError(walletValidation.error || "Wallet address must be a valid Stellar public key starting with G.");
       return;
     }
 
@@ -293,7 +297,12 @@ export default function CreatePage() {
                       </span>
                     )}
                   </div>
-                  <p className="text-[10px] text-steel/50 pl-1">
+                  {form.walletAddress && !walletValidation.isValid && (
+                    <p className="mt-2 text-[10px] font-medium text-red-400 animate-in fade-in slide-in-from-top-1 duration-200">
+                      {walletValidation.error}
+                    </p>
+                  )}
+                  <p className="text-[10px] text-steel/50 pl-1 mt-1">
                     56-character Stellar public key starting with G
                   </p>
                 </div>
