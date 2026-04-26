@@ -10,6 +10,19 @@ The initial contract is intentionally small:
 - require supporter authorization
 - emit a support event
 - keep a simple support counter
+- comprehensive error handling with specific error codes
+
+## Error Handling
+
+The contract now includes comprehensive error codes for better debugging and user experience. See [ERROR_CODES.md](ERROR_CODES.md) for detailed documentation of all error codes and their meanings.
+
+Key error categories:
+- **Input validation errors** (1-99): Invalid amounts, messages, asset codes
+- **Authorization errors** (100-199): Admin access, recipient permissions
+- **Contract state errors** (200-299): Initialization, pause state
+- **Balance and transfer errors** (300-399): Insufficient funds, withdrawal limits
+- **Storage and data errors** (400-499): Missing data, recipient not found
+- **Asset and token errors** (500-599): Invalid assets, token client issues
 
 ## Why It Is Small
 
