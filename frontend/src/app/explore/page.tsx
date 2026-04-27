@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { API_BASE_URL } from "@/lib/config";
+import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 
 type Profile = {
   id: string;
@@ -25,6 +26,13 @@ export default function ExplorePage() {
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const limit = 20;
+
+  const sentinelRef = useInfiniteScroll({
+    onLoadMore: handleLoadMore,
+    hasMore,
+    isLoading: loading,
+    threshold: 0.8,
+  });
 
   useEffect(() => {
     setOffset(0);
@@ -184,15 +192,27 @@ export default function ExplorePage() {
               ))}
             </div>
 
-            {/* Load More button */}
+            {/* Infinite scroll sentinel */}
             {hasMore && profiles.length > 0 && (
-              <div className="mt-8 text-center">
+              <div ref={sentinelRef} className="mt-8 text-center py-4">
+                {loading && (
+                  <div className="flex items-center justify-center gap-2">
+                    <div className="h-2 w-2 rounded-full bg-mint animate-pulse" />
+                    <div className="h-2 w-2 rounded-full bg-mint animate-pulse delay-75" />
+                    <div className="h-2 w-2 rounded-full bg-mint animate-pulse delay-150" />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Fallback Load More button */}
+            {hasMore && profiles.length > 0 && !loading && (
+              <div className="mt-4 text-center">
                 <button
                   onClick={handleLoadMore}
-                  disabled={loading}
-                  className="rounded-full bg-mint px-6 py-3 text-sm font-semibold text-ink transition hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="rounded-full bg-mint/20 border border-mint/30 px-6 py-2 text-sm font-medium text-mint transition hover:bg-mint/30"
                 >
-                  {loading ? "Loading..." : "Load More"}
+                  Load More
                 </button>
               </div>
             )}
