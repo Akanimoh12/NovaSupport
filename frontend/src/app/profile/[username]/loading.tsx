@@ -1,13 +1,10 @@
 import { AppShell } from "@/components/app-shell";
-import { ProfileSkeleton, SidebarSkeleton } from "@/components/skeleton";
+import { ProfilePageSkeleton } from "@/components/profile-skeleton";
 
 export default function Loading() {
   return (
     <AppShell>
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-8 items-start">
-        <ProfileSkeleton />
-        <SidebarSkeleton />
-      </div>
+      <ProfilePageSkeleton />
     </AppShell>
   );
 }

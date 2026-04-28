@@ -59,6 +59,11 @@ vi.mock('./wallet-connect', () => ({
   },
 }));
 
+const showToast = vi.fn();
+vi.mock('@/lib/use-toast', () => ({
+  useToast: () => ({ showToast }),
+}));
+
 describe('SupportPanel', () => {
   const mockProps = {
     walletAddress: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
@@ -67,6 +72,10 @@ describe('SupportPanel', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      configurable: true,
+    });
   });
 
   it('submits a signed transaction and shows the transaction hash', async () => {
@@ -177,5 +186,29 @@ describe('SupportPanel', () => {
   it('renders recurring support toggle', async () => {
     render(<SupportPanel {...mockProps} />);
     await waitFor(() => expect(screen.getByText('Make it recurring')).toBeInTheDocument());
+  });
+
+  it('copies recipient address and shows feedback toast', async () => {
+    render(<SupportPanel {...mockProps} />);
+    await waitFor(() => expect(screen.getByText('Recipient Address')).toBeInTheDocument());
+    fireEvent.click(
+      screen.getByRole('button', { name: /copy recipient address to clipboard/i }),
+    );
+
+    await waitFor(() => {
+      expect(showToast).toHaveBeenCalledWith('Recipient address copied!', 'success');
+    });
+  });
+
+  it('supports Ctrl/Cmd+C on focused recipient address', async () => {
+    render(<SupportPanel {...mockProps} />);
+    await waitFor(() => expect(screen.getByText('Recipient Address')).toBeInTheDocument());
+    const recipientAddress = screen.getByLabelText(/Recipient Stellar wallet address/i);
+    recipientAddress.focus();
+    fireEvent.keyDown(recipientAddress, { key: 'c', metaKey: true });
+
+    await waitFor(() => {
+      expect(showToast).toHaveBeenCalledWith('Recipient address copied!', 'success');
+    });
   });
 });
