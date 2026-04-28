@@ -1457,6 +1457,31 @@ export function createApp(customLogger?: Logger) {
     return res.status(204).send();
   });
 
+  app.get("/profiles/:username/webhooks/:id/deliveries", requireAuth, async (req, res) => {
+    const profile = await resolveProfileOwner(req.params.username as string, (req.auth!.userId || req.auth!.walletAddress) as string, res);
+    if (!profile) return;
+
+    const webhook = await prisma.webhook.findFirst({
+      where: { id: req.params.id as string, profileId: profile.id },
+    });
+    if (!webhook) return sendError(res, 404, "Webhook not found");
+
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+    const offset = parseInt(req.query.offset as string) || 0;
+
+    const [deliveries, total] = await Promise.all([
+      prisma.webhookDelivery.findMany({
+        where: { webhookId: webhook.id },
+        take: limit,
+        skip: offset,
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.webhookDelivery.count({ where: { webhookId: webhook.id } }),
+    ]);
+
+    return res.json({ deliveries, total, limit, offset });
+  });
+
   app.get("/profiles/:username/leaderboard", async (req, res) => {
     const { username } = req.params;
     const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 10, 1), 100);
@@ -1764,41 +1789,15 @@ export function createApp(customLogger?: Logger) {
               .update(payload)
               .digest("hex");
 
-            // Deliver with up to 3 attempts and exponential backoff (#278)
-            (async () => {
-              for (let attempt = 1; attempt <= 3; attempt++) {
-                try {
-                  const response = await fetch(webhook.url, {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                      "X-NovaSupport-Signature": signature,
-                    },
-                    body: payload,
-                    signal: AbortSignal.timeout(10_000),
-                  });
-                  logger.info(
-                    { webhookId: webhook.id, profileId: supportRecord.profileId, status: response.status, attempt },
-                    "webhook delivered",
-                  );
-                  break; // success — stop retrying
-                } catch (err) {
-                  if (attempt < 3) {
-                    const delayMs = 1000 * 2 ** (attempt - 1); // 1s, 2s
-                    logger.warn(
-                      { webhookId: webhook.id, attempt, delayMs, err },
-                      "webhook delivery failed, retrying",
-                    );
-                    await new Promise((r) => setTimeout(r, delayMs));
-                  } else {
-                    logger.error(
-                      { webhookId: webhook.id, profileId: supportRecord.profileId, err },
-                      "webhook delivery failed after 3 attempts",
-                    );
-                  }
-                }
-              }
-            })();
+            // Persist for background delivery with exponential backoff (#webhook-persistence)
+            await prisma.webhookDelivery.create({
+              data: {
+                webhookId: webhook.id,
+                eventType: "support.received",
+                payload: JSON.parse(payload),
+                status: "pending",
+              },
+            });
           }
         } catch (err) {
           logger.error(

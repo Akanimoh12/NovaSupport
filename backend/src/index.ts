@@ -77,6 +77,7 @@ if (startupConfig.horizonUrl.includes("testnet")) {
 
 import { app } from "./app.js";
 import { startDripScheduler } from "./services/drip-scheduler.js";
+import { startWebhookProcessor } from "./services/webhook-processor.js";
 import { EventIndexer } from "./services/event-indexer.js";
 import { createSorobanRpcClient } from "./services/soroban-rpc-client.js";
 import { prisma } from "./db.js";
@@ -106,6 +107,9 @@ app.listen(port, () => {
 
   // Start the recurring drip scheduler if enabled
   startDripScheduler();
+
+  // Start the webhook delivery processor
+  startWebhookProcessor();
 
   if (eventIndexer) {
     eventIndexer.start();

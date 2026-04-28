@@ -102,8 +102,26 @@ model Webhook {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  deliveries WebhookDelivery[]
 
   @@index([profileId])
+}
+
+model WebhookDelivery {
+  id           String   @id @default(cuid())
+  webhookId    String
+  eventType    String
+  payload      Json
+  status       String   @default("pending") // "pending", "success", "failed"
+  attemptCount Int      @default(0)
+  nextRetryAt  DateTime @default(now())
+  lastError    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  webhook      Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId])
+  @@index([status, nextRetryAt])
 }
 
 model RecurringSupport {
