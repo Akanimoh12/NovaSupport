@@ -42,6 +42,9 @@ model Profile {
   recurringSupports   RecurringSupport[]
   milestones          Milestone[]
   webhooks            Webhook[]
+
+  @@index([createdAt(sort: Desc)])
+  @@index([ownerId])
 }
 
 model AcceptedAsset {
@@ -75,6 +78,10 @@ model SupportTransaction {
 
   @@index([profileId])
   @@index([supporterId])
+  @@index([profileId, status, createdAt(sort: Desc)])
+  @@index([supporterAddress, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  @@index([status])
 }
 
 model Milestone {
@@ -141,6 +148,7 @@ model RecurringSupport {
   @@index([supporterId])
   @@index([profileId])
   @@index([nextRunAt])
+  @@index([nextRunAt, status])
 }
 
 // #281: cursor record for the contract event indexer.

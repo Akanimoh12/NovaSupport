@@ -1900,6 +1900,7 @@ export function createApp(customLogger?: Logger) {
   app.get("/analytics/:campaignId", async (req, res) => {
     // Analytics endpoint — returns summary + recent transactions with pagination
     const { campaignId } = req.params;
+    const { startDate, endDate, format } = req.query;
 
     const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
     const offset = parseInt(req.query.offset as string) || 0;
@@ -1914,78 +1915,38 @@ export function createApp(customLogger?: Logger) {
       return sendError(res, 404, "Profile not found");
     }
 
-    const transactions = await prisma.supportTransaction.findMany({
-      where: { profileId: profile.id, status: "SUCCESS" },
-      orderBy: { createdAt: "desc" },
-    });
-
-    const totalAmount = transactions.reduce(
-      (sum: number, tx: (typeof transactions)[number]) =>
-        sum + Number(tx.amount),
-      0,
-    );
-    const uniqueSupporters = new Set(
-      transactions.map(
-        (tx: (typeof transactions)[number]) => tx.supporterAddress,
-      ),
-    ).size;
-
-    // Calculate daily contributions for last 7 days
-    const last7Days = Array.from({ length: 7 }, (_, i) => {
-      const d = new Date();
-      d.setDate(d.getDate() - (6 - i));
-      return d.toISOString().split("T")[0];
-    });
-
-    const dailyMap = new Map<string, number>();
-    last7Days.forEach((date) => dailyMap.set(date, 0));
-
-    transactions.forEach((tx: (typeof transactions)[number]) => {
-      const date = tx.createdAt.toISOString().split("T")[0];
-      if (dailyMap.has(date)) {
-        dailyMap.set(date, (dailyMap.get(date) || 0) + Number(tx.amount));
+    try {
+      const { getAnalytics } = await import("./analytics.js");
+      
+      const start = startDate ? new Date(startDate as string) : undefined;
+      const end = endDate ? new Date(endDate as string) : undefined;
+      
+      if ((startDate && isNaN(start!.getTime())) || (endDate && isNaN(end!.getTime()))) {
+        return sendError(res, 400, "Invalid date format");
       }
-    });
 
-    const dailyContributions = Array.from(dailyMap.entries()).map(
-      ([date, amount]) => ({
-        date,
-        amount: Number(amount.toFixed(7)),
-      }),
-    );
-
-    // Calculate asset breakdown
-    const assetMap = new Map<string, number>();
-    transactions.forEach((tx: (typeof transactions)[number]) => {
-      assetMap.set(
-        tx.assetCode,
-        (assetMap.get(tx.assetCode) || 0) + Number(tx.amount),
+      const analytics = await getAnalytics(
+        profile.id, 
+        start, 
+        end, 
+        format as "json" | "csv"
       );
-    });
 
-    const assetBreakdown = Array.from(assetMap.entries()).map(
-      ([name, value]) => ({
-        name,
-        value: Number(value.toFixed(7)),
-      }),
-    );
+      if (format === "csv") {
+        res.setHeader("Content-Type", "text/csv");
+        res.setHeader("Content-Disposition", `attachment; filename=analytics-${campaignId}.csv`);
+        return res.send(analytics);
+      }
 
-    const avgContribution =
-      transactions.length > 0 ? totalAmount / transactions.length : 0;
-
-    res.json({
-      profile: { username: profile.username, displayName: profile.displayName },
-      summary: {
-        totalRaised: Number(totalAmount.toFixed(7)),
-        totalContributors: uniqueSupporters,
-        avgContribution: Number(avgContribution.toFixed(7)),
-        activeDrips: 0, // Not yet implemented in schema
-      },
-      dailyContributions,
-      assetBreakdown,
-      recentTransactions: transactions.slice(offset, offset + limit),
-      transactionTotal: transactions.length,
-    });
+      res.json({
+        profile: { username: profile.username, displayName: profile.displayName },
+        ...analytics,
+        recentTransactions: analytics.dailyContributions, // For backward compatibility or adjustment
+      });
+    } catch (err) {
+      req.log.error({ err }, "failed to fetch analytics");
+      return sendError(res, 500, "Internal server error");
+    }
   });
 
   // ── Avatar upload ──────────────────────────────────────────────────────

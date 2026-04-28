@@ -5,6 +5,7 @@ import { ProfileCard } from "@/components/profile-card";
 import { SupportPanel } from "@/components/support-panel";
 import { ProfileTabs } from "@/components/profile-tabs";
 import { QRCodeButton } from "@/components/qr-code-button";
+import { EmptyState } from "@/components/empty-state";
 import { API_BASE_URL } from "@/lib/config";
 
 type PageProps = {
@@ -292,7 +293,7 @@ export default async function ProfilePage({ params }: PageProps) {
             recipientDisplayName={profile.displayName}
           />
 
-          {leaderboard.length > 0 && (
+          {leaderboard.length > 0 ? (
             <div className="mt-6 rounded-3xl border border-white/5 bg-white/[0.02] p-6">
               <h4 className="text-[10px] uppercase tracking-[0.25em] text-steel font-bold mb-4">
                 Top Supporters
@@ -318,6 +319,14 @@ export default async function ProfilePage({ params }: PageProps) {
                   </div>
                 ))}
               </div>
+            </div>
+          ) : (
+            <div className="mt-6">
+              <EmptyState
+                variant="supporters"
+                title="Be the first to support!"
+                description="This profile hasn't received support yet."
+              />
             </div>
           )}
 

@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
+import { EmptyState } from "./empty-state";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
@@ -126,12 +127,11 @@ export function ProfileTabs({ username }: { username: string }) {
                 </table>
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                <p className="text-gray-500 font-medium">No support yet</p>
-                <p className="text-sm text-gray-400 mt-1">
-                  Be the first to support {username}!
-                </p>
-              </div>
+              <EmptyState
+                variant="transactions"
+                title="No transactions yet"
+                description="Be the first to support this creator!"
+              />
             )}
           </motion.div>
         ) : (
@@ -142,10 +142,11 @@ export function ProfileTabs({ username }: { username: string }) {
             exit={{ opacity: 0, y: -10 }}
             className="min-h-[300px]"
           >
-            <div className="flex flex-col items-center justify-center py-12 text-center text-gray-400">
-              <p className="text-lg font-medium">Badges coming soon</p>
-              <p className="text-sm mt-1">Achievement badges will appear here once earned.</p>
-            </div>
+            <EmptyState
+              variant="default"
+              title="Badges coming soon"
+              description="Achievement badges will appear here once earned. Start supporting creators to be eligible!"
+            />
           </motion.div>
         )}
       </AnimatePresence>
