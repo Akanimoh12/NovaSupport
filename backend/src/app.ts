@@ -2260,6 +2260,38 @@ export function createApp(customLogger?: Logger) {
     return res.json(updated);
   });
 
+  app.get("/recurring-support/:id", requireAuth, async (req, res) => {
+    const { id } = req.params;
+
+    const user = await prisma.user.findFirst({ where: { email: req.auth!.walletAddress } });
+    if (!user) return sendError(res, 401, "User not found");
+
+    const subscription = await prisma.recurringSupport.findUnique({
+      where: { id: id as string },
+      include: { profile: { select: { username: true, displayName: true } } },
+    });
+
+    if (!subscription) return sendError(res, 404, "Recurring support not found");
+    if (subscription.supporterId !== user.id) return sendError(res, 403, "Forbidden");
+
+    return res.json(subscription);
+  });
+
+  app.delete("/recurring-support/:id", requireAuth, async (req, res) => {
+    const { id } = req.params;
+
+    const user = await prisma.user.findFirst({ where: { email: req.auth!.walletAddress } });
+    if (!user) return sendError(res, 401, "User not found");
+
+    const subscription = await prisma.recurringSupport.findUnique({ where: { id: id as string } });
+    if (!subscription) return sendError(res, 404, "Recurring support not found");
+    if (subscription.supporterId !== user.id) return sendError(res, 403, "Forbidden");
+
+    await prisma.recurringSupport.delete({ where: { id: id as string } });
+
+    return res.status(204).send();
+  });
+
   app.get("/profiles/:username/analytics/timeseries", async (req, res) => {
     const { username } = req.params;
     const period = (req.query.period as string) || "daily";

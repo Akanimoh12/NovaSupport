@@ -23,6 +23,10 @@ export default function ExplorePage() {
   const [error, setError] = useState<string | null>(null);
   const [sort, setSort] = useState<SortOption>("newest");
   const [asset, setAsset] = useState<AssetFilter>("all");
+  const [assetIssuer, setAssetIssuer] = useState<string>("");
+  const [availableIssuers, setAvailableIssuers] = useState<
+    Array<{ code: string; issuer: string }>
+  >([]);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const limit = 20;
@@ -39,7 +43,25 @@ export default function ExplorePage() {
     setProfiles([]);
     setHasMore(true);
     fetchProfiles(0, true);
-  }, [sort, asset]);
+  }, [sort, asset, assetIssuer]);
+
+  useEffect(() => {
+    const issuers = new Set<string>();
+    profiles.forEach((p) => {
+      p.acceptedAssets.forEach((a) => {
+        if (a.issuer) {
+          issuers.add(`${a.code}:${a.issuer}`);
+        }
+      });
+    });
+    const unique = Array.from(issuers)
+      .map((str) => {
+        const [code, issuer] = str.split(":");
+        return { code, issuer };
+      })
+      .sort((a, b) => a.code.localeCompare(b.code) || a.issuer.localeCompare(b.issuer));
+    setAvailableIssuers(unique);
+  }, [profiles]);
 
   async function fetchProfiles(currentOffset: number, reset = false) {
     try {
@@ -54,6 +76,10 @@ export default function ExplorePage() {
 
       if (asset !== "all") {
         params.append("asset", asset);
+      }
+
+      if (assetIssuer) {
+        params.append("assetIssuer", assetIssuer);
       }
 
       const response = await fetch(`${API_BASE_URL}/profiles?${params}`);
@@ -83,6 +109,10 @@ export default function ExplorePage() {
     setOffset(newOffset);
     fetchProfiles(newOffset);
   }
+
+  const filteredIssuers = availableIssuers.filter((i) =>
+    asset === "all" || i.code === asset
+  );
 
   return (
     <div className="min-h-screen px-6 py-8">
@@ -115,7 +145,10 @@ export default function ExplorePage() {
             </label>
             <select
               value={asset}
-              onChange={(e) => setAsset(e.target.value as AssetFilter)}
+              onChange={(e) => {
+                setAsset(e.target.value as AssetFilter);
+                setAssetIssuer("");
+              }}
               className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white focus:border-mint/50 focus:outline-none"
             >
               <option value="all">All</option>
@@ -123,6 +156,26 @@ export default function ExplorePage() {
               <option value="USDC">USDC</option>
             </select>
           </div>
+
+          {filteredIssuers.length > 0 && (
+            <div>
+              <label className="text-xs uppercase tracking-[0.2em] text-sky/70 block mb-2">
+                Issuer
+              </label>
+              <select
+                value={assetIssuer}
+                onChange={(e) => setAssetIssuer(e.target.value)}
+                className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white focus:border-mint/50 focus:outline-none"
+              >
+                <option value="">All Issuers</option>
+                {filteredIssuers.map((issuer) => (
+                  <option key={issuer.issuer} value={issuer.issuer}>
+                    {issuer.issuer.slice(0, 8)}...
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         {/* Loading skeleton */}
@@ -179,12 +232,13 @@ export default function ExplorePage() {
                     {profile.bio}
                   </p>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    {profile.acceptedAssets.slice(0, 3).map((asset, idx) => (
+                    {profile.acceptedAssets.slice(0, 3).map((a, idx) => (
                       <span
                         key={idx}
                         className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-mint/20 text-mint"
+                        title={a.issuer ? `Issuer: ${a.issuer}` : ""}
                       >
-                        {asset.code}
+                        {a.code}
                       </span>
                     ))}
                   </div>
