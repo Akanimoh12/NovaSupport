@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { API_BASE_URL } from "@/lib/config";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
+import { EmptyState } from "@/components/empty-state";
 
 type Profile = {
   id: string;
@@ -278,9 +279,11 @@ export default function ExplorePage() {
             )}
 
             {profiles.length === 0 && !loading && !error && (
-              <div className="text-center py-12">
-                <p className="text-sky/70">No profiles found</p>
-              </div>
+              <EmptyState
+                variant="explore"
+                title="No creators found"
+                description="Try adjusting your search filters or check back later."
+              />
             )}
           </>
         ) : null}

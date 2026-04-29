@@ -6,15 +6,17 @@ describe('Toast', () => {
   const mockDismiss = vi.fn();
 
   it('renders success toast', () => {
-    render(<Toast message="Success!" type="success" onDismiss={mockDismiss} />);
+    const { container } = render(<Toast message="Success!" type="success" onDismiss={mockDismiss} />);
     
     expect(screen.getByText('Success!')).toBeInTheDocument();
+    expect(container).toMatchSnapshot();
   });
 
   it('renders error toast', () => {
-    render(<Toast message="Error!" type="error" onDismiss={mockDismiss} />);
+    const { container } = render(<Toast message="Error!" type="error" onDismiss={mockDismiss} />);
     
     expect(screen.getByText('Error!')).toBeInTheDocument();
+    expect(container).toMatchSnapshot();
   });
 
   it('calls onDismiss when close button is clicked', () => {

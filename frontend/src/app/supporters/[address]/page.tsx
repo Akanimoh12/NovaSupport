@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
+import { EmptyState } from "@/components/empty-state";
 import { API_BASE_URL } from "@/lib/config";
 import { StrKey } from "@stellar/stellar-sdk";
 import { ExternalLink, AlertCircle } from "lucide-react";
@@ -79,12 +80,11 @@ export default async function SupporterPage({ params }: PageProps) {
     return (
       <AppShell>
         <div className="mx-auto max-w-4xl">
-          <div className="flex h-[60vh] flex-col items-center justify-center gap-4">
-            <div className="rounded-full bg-sky/10 p-4 text-sky">
-              <AlertCircle size={48} />
-            </div>
-            <h2 className="text-2xl font-bold text-white">No Activity Found</h2>
-            <p className="text-steel">This wallet hasn&apos;t supported any creators yet.</p>
+          <div className="flex min-h-[60vh] flex-col items-center justify-center">
+            <EmptyState
+              title="No Activity Found"
+              description="This wallet hasn't supported any creators yet."
+            />
           </div>
         </div>
       </AppShell>

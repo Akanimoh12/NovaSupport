@@ -54,16 +54,18 @@ describe('ProfileCard', () => {
   };
 
   it('renders display name and username', () => {
-    render(<ProfileCard {...mockProfile} />);
+    const { container } = render(<ProfileCard {...mockProfile} />);
     
     expect(screen.getByText('@stellar-dev')).toBeInTheDocument();
     expect(screen.getByText('Stellar Developer')).toBeInTheDocument();
+    expect(container).toMatchSnapshot();
   });
 
   it('renders bio', () => {
-    render(<ProfileCard {...mockProfile} />);
+    const { container } = render(<ProfileCard {...mockProfile} />);
     
     expect(screen.getByText('Building on Stellar blockchain')).toBeInTheDocument();
+    expect(container).toMatchSnapshot();
   });
 
   it('renders wallet address', () => {
@@ -96,6 +98,7 @@ describe('ProfileCard', () => {
     expect(container.querySelector('article')).toBeInTheDocument();
     // The display name should NOT be rendered
     expect(screen.queryByText('Stellar Developer')).not.toBeInTheDocument();
+    expect(container).toMatchSnapshot();
   });
 
   it('shows success toast after copying wallet address', async () => {

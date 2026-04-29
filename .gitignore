@@ -23,3 +23,6 @@ is.md
 issue.md
 pr.md
 checks.md
+.agents/
+.claude/
+skills-lock.json

@@ -1,0 +1,37 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Toast > renders error toast 1`] = `
+<div>
+  <div
+    class="fixed bottom-4 right-4 px-4 py-3 rounded shadow-lg text-white
+      bg-red-600"
+  >
+    <span>
+      Error!
+    </span>
+    <button
+      class="ml-4 font-bold"
+    >
+      ×
+    </button>
+  </div>
+</div>
+`;
+
+exports[`Toast > renders success toast 1`] = `
+<div>
+  <div
+    class="fixed bottom-4 right-4 px-4 py-3 rounded shadow-lg text-white
+      bg-green-600"
+  >
+    <span>
+      Success!
+    </span>
+    <button
+      class="ml-4 font-bold"
+    >
+      ×
+    </button>
+  </div>
+</div>
+`;

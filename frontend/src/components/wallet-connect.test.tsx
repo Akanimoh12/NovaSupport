@@ -30,11 +30,12 @@ describe('WalletConnect', () => {
   });
 
   it('renders connect button when disconnected', () => {
-    render(<WalletConnect />);
+    const { container } = render(<WalletConnect />);
     
     expect(screen.getByText('Wallet')).toBeInTheDocument();
     expect(screen.getByText('Connect Freighter to preview Stellar Testnet support.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Connect Freighter' })).toBeInTheDocument();
+    expect(container).toMatchSnapshot();
   });
 
   it('shows address when connected', async () => {
