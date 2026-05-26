@@ -122,6 +122,16 @@ function createRateLimiters() {
   return { globalLimiter, writeLimiter, profileCreationLimiter, resendLimiter };
 }
 
+// ── API versioning constants ───────────────────────────────────────────
+const CURRENT_API_VERSION = "1";
+const SUPPORTED_API_VERSIONS = ["1"];
+
+// ── Shared pagination schema (used across multiple routes) ────────────
+const paginationSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
 function sendError(
   res: Response,
   status: number,
@@ -219,6 +229,16 @@ export function createApp(customLogger?: Logger) {
   app.use(pinoHttp({ logger: customLogger ?? logger }));
   app.use(globalLimiter);
 
+  // ── API-Version header on every response ──────────────────────────────
+  app.use((_req, res, next) => {
+    res.setHeader("API-Version", CURRENT_API_VERSION);
+    res.setHeader("X-Supported-API-Versions", SUPPORTED_API_VERSIONS.join(", "));
+    next();
+  });
+
+  // ── Build the versioned v1 router ─────────────────────────────────────
+  const v1Router = express.Router();
+
   /**
    * @openapi
    * /health:
@@ -232,7 +252,7 @@ export function createApp(customLogger?: Logger) {
    */
   // ── Health check with database connectivity ────────────────────────────
 
-  app.get("/health", async (req, res) => {
+  v1Router.get("/health", async (req, res) => {
     try {
       await prisma.$queryRaw`SELECT 1`;
       res.json({
@@ -302,7 +322,7 @@ export function createApp(customLogger?: Logger) {
    *                   example: Invalid wallet address
    */
   // Request a challenge nonce for wallet signature
-  app.post("/auth/challenge", (req, res) => {
+  v1Router.post("/auth/challenge", (req, res) => {
     const { walletAddress } = req.body;
 
     if (!walletAddress || !isValidStellarAddress(walletAddress)) {
@@ -350,7 +370,7 @@ export function createApp(customLogger?: Logger) {
    *       401:
    *         description: Invalid signature
    */
-  app.post("/auth/verify", async (req, res) => {
+  v1Router.post("/auth/verify", async (req, res) => {
     const parsed = verifySchema.safeParse(req.body);
     if (!parsed.success) {
       return sendError(res, 400, "Invalid request body");
@@ -473,7 +493,7 @@ export function createApp(customLogger?: Logger) {
    *       500:
    *         description: Internal server error
    */
-  app.get("/profiles", async (req, res) => {
+  v1Router.get("/profiles", async (req, res) => {
     try {
       const pagination = paginationSchema.safeParse(req.query);
       if (!pagination.success) {
@@ -620,7 +640,7 @@ export function createApp(customLogger?: Logger) {
    *       500:
    *         description: Internal server error
    */
-  app.get("/profiles/search", async (req, res) => {
+  v1Router.get("/profiles/search", async (req, res) => {
     const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
 
     if (!q) {
@@ -676,7 +696,7 @@ export function createApp(customLogger?: Logger) {
    *       500:
    *         description: Internal server error
    */
-  app.get("/profiles/:username", async (req, res) => {
+  v1Router.get("/profiles/:username", async (req, res) => {
     try {
       const profile = await prisma.profile.findUnique({
         where: { username: req.params.username },
@@ -696,7 +716,7 @@ export function createApp(customLogger?: Logger) {
     }
   });
 
-  app.get("/profiles/:username/stats", async (req, res) => {
+  v1Router.get("/profiles/:username/stats", async (req, res) => {
     try {
       const profile = await prisma.profile.findUnique({
         where: { username: req.params.username },
@@ -850,7 +870,7 @@ export function createApp(customLogger?: Logger) {
    *       500:
    *         description: Internal server error
    */
-  app.post("/profiles", requireAuth, profileCreationLimiter, writeLimiter, async (req, res) => {
+  v1Router.post("/profiles", requireAuth, profileCreationLimiter, writeLimiter, async (req, res) => {
     const parsed = createProfileSchema.safeParse(req.body);
 
     if (!parsed.success) {
@@ -1004,7 +1024,7 @@ export function createApp(customLogger?: Logger) {
    *       500:
    *         description: Internal server error
    */
-  app.patch(
+  v1Router.patch(
     "/profiles/:username",
     requireAuth,
     writeLimiter,
@@ -1075,7 +1095,7 @@ export function createApp(customLogger?: Logger) {
 
   // ── Email verification (#275) ─────────────────────────────────────────
 
-  app.post("/profiles/:username/verify-email", async (req, res) => {
+  v1Router.post("/profiles/:username/verify-email", async (req, res) => {
     const { token } = req.body as { token?: unknown };
 
     if (!token || typeof token !== "string") {
@@ -1111,7 +1131,7 @@ export function createApp(customLogger?: Logger) {
     }
   });
 
-  app.post(
+  v1Router.post(
     "/profiles/:username/resend-verification-email",
     requireAuth,
     resendLimiter,
@@ -1221,7 +1241,7 @@ export function createApp(customLogger?: Logger) {
    *       500:
    *         description: Internal server error
    */
-  app.patch(
+  v1Router.patch(
     "/profiles/:username/assets",
     requireAuth,
     writeLimiter,
@@ -1389,7 +1409,7 @@ export function createApp(customLogger?: Logger) {
    *       500:
    *         description: Internal server error
    */
-  app.get("/profiles/:username/transactions", async (req, res) => {
+  v1Router.get("/profiles/:username/transactions", async (req, res) => {
     const pagination = paginationSchema.safeParse(req.query);
     if (!pagination.success) {
       return sendError(res, 400, "Invalid pagination parameters", "INVALID_PAGINATION");
@@ -1453,7 +1473,7 @@ export function createApp(customLogger?: Logger) {
     return profile;
   }
 
-  app.post("/profiles/:username/webhooks", requireAuth, async (req, res) => {
+  v1Router.post("/profiles/:username/webhooks", requireAuth, async (req, res) => {
     const parsed = webhookCreateSchema.safeParse(req.body);
     if (!parsed.success) return sendError(res, 400, "Invalid URL — must be a valid HTTPS URL");
 
@@ -1468,7 +1488,7 @@ export function createApp(customLogger?: Logger) {
     return res.status(201).json({ id: webhook.id, url: webhook.url, secret });
   });
 
-  app.get("/profiles/:username/webhooks", requireAuth, async (req, res) => {
+  v1Router.get("/profiles/:username/webhooks", requireAuth, async (req, res) => {
     const profile = await resolveProfileOwner(req.params.username as string, (req.auth!.userId || req.auth!.walletAddress) as string, res);
     if (!profile) return;
 
@@ -1480,7 +1500,7 @@ export function createApp(customLogger?: Logger) {
     return res.json(webhooks);
   });
 
-  app.delete("/profiles/:username/webhooks/:id", requireAuth, async (req, res) => {
+  v1Router.delete("/profiles/:username/webhooks/:id", requireAuth, async (req, res) => {
     const profile = await resolveProfileOwner(req.params.username as string, (req.auth!.userId || req.auth!.walletAddress) as string, res);
     if (!profile) return;
 
@@ -1493,7 +1513,7 @@ export function createApp(customLogger?: Logger) {
     return res.status(204).send();
   });
 
-  app.get("/profiles/:username/webhooks/:id/deliveries", requireAuth, async (req, res) => {
+  v1Router.get("/profiles/:username/webhooks/:id/deliveries", requireAuth, async (req, res) => {
     const profile = await resolveProfileOwner(req.params.username as string, (req.auth!.userId || req.auth!.walletAddress) as string, res);
     if (!profile) return;
 
@@ -1518,7 +1538,7 @@ export function createApp(customLogger?: Logger) {
     return res.json({ deliveries, total, limit, offset });
   });
 
-  app.get("/profiles/:username/leaderboard", async (req, res) => {
+  v1Router.get("/profiles/:username/leaderboard", async (req, res) => {
     const pagination = paginationSchema.safeParse(req.query);
     if (!pagination.success) {
       return sendError(res, 400, "Invalid pagination parameters", "INVALID_PAGINATION");
@@ -1594,7 +1614,7 @@ export function createApp(customLogger?: Logger) {
     return res.json(payload);
   });
 
-  app.get("/indexer/status", async (_req, res) => {
+  v1Router.get("/indexer/status", async (_req, res) => {
     const contractId =
       process.env.SOROBAN_CONTRACT_ID ??
       process.env.CONTRACT_ID ??
@@ -1692,7 +1712,7 @@ export function createApp(customLogger?: Logger) {
    *       500:
    *         description: Internal server error
    */
-  app.post(
+  v1Router.post(
     "/support-transactions",
     requireAuth,
     writeLimiter,
@@ -1888,7 +1908,7 @@ export function createApp(customLogger?: Logger) {
    *       404:
    *         description: Analytics not found
    */
-  app.get("/analytics/:campaignId", async (req, res) => {
+  v1Router.get("/analytics/:campaignId", async (req, res) => {
     const pagination = paginationSchema.safeParse(req.query);
     if (!pagination.success) {
       return sendError(res, 400, "Invalid pagination parameters", "INVALID_PAGINATION");
@@ -1977,7 +1997,7 @@ export function createApp(customLogger?: Logger) {
    *       503:
    *         description: Avatar upload service unavailable
    */
-  app.post(
+  v1Router.post(
     "/profiles/:username/avatar",
     requireAuth,
     writeLimiter,
@@ -2037,7 +2057,7 @@ export function createApp(customLogger?: Logger) {
 
   // ── Multer error handler ───────────────────────────────────────────────
 
-  app.use(
+  v1Router.use(
     (
       err: unknown,
       req: express.Request,
@@ -2063,7 +2083,7 @@ export function createApp(customLogger?: Logger) {
     assetCode: z.string().default("XLM"),
   });
 
-  app.post("/profiles/:username/milestones", requireAuth, writeLimiter, async (req, res) => {
+  v1Router.post("/profiles/:username/milestones", requireAuth, writeLimiter, async (req, res) => {
     try {
       const username = req.params.username as string;
       const profile = await prisma.profile.findUnique({
@@ -2100,7 +2120,7 @@ export function createApp(customLogger?: Logger) {
     }
   });
 
-  app.get("/profiles/:username/milestones", async (req, res) => {
+  v1Router.get("/profiles/:username/milestones", async (req, res) => {
     try {
       const profile = await prisma.profile.findUnique({
         where: { username: req.params.username },
@@ -2121,7 +2141,7 @@ export function createApp(customLogger?: Logger) {
     }
   });
 
-  app.patch("/profiles/:username/milestones/:milestoneId", requireAuth, writeLimiter, async (req, res) => {
+  v1Router.patch("/profiles/:username/milestones/:milestoneId", requireAuth, writeLimiter, async (req, res) => {
     try {
       const username = req.params.username as string;
       const milestoneId = req.params.milestoneId as string;
@@ -2163,7 +2183,7 @@ export function createApp(customLogger?: Logger) {
     }
   });
 
-  app.delete("/profiles/:username/milestones/:milestoneId", requireAuth, writeLimiter, async (req, res) => {
+  v1Router.delete("/profiles/:username/milestones/:milestoneId", requireAuth, writeLimiter, async (req, res) => {
     try {
       const username = req.params.username as string;
       const milestoneId = req.params.milestoneId as string;
@@ -2201,7 +2221,7 @@ export function createApp(customLogger?: Logger) {
 
   // ── Supporters ─────────────────────────────────────────────────────────
 
-  app.get("/supporters/:address", async (req, res) => {
+  v1Router.get("/supporters/:address", async (req, res) => {
     try {
       const { address } = req.params;
 
@@ -2249,7 +2269,7 @@ export function createApp(customLogger?: Logger) {
 
   // ── Recurring Support ───────────────────────────────────────────────────
 
-  app.post("/recurring-support", requireAuth, writeLimiter, async (req, res) => {
+  v1Router.post("/recurring-support", requireAuth, writeLimiter, async (req, res) => {
     const { profileId, amount, assetCode, frequency } = req.body;
 
     if (!profileId || !amount || !frequency) {
@@ -2286,7 +2306,7 @@ export function createApp(customLogger?: Logger) {
     return res.status(201).json({ message: "Recurring support created" });
   });
 
-  app.get("/recurring-support", requireAuth, async (req, res) => {
+  v1Router.get("/recurring-support", requireAuth, async (req, res) => {
     const user = await prisma.user.findFirst({ where: { email: req.auth!.walletAddress } });
     if (!user) return sendError(res, 401, "User not found");
 
@@ -2299,7 +2319,7 @@ export function createApp(customLogger?: Logger) {
     return res.json(subscriptions);
   });
 
-  app.patch("/recurring-support/:id", requireAuth, async (req, res) => {
+  v1Router.patch("/recurring-support/:id", requireAuth, async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
 
@@ -2319,7 +2339,7 @@ export function createApp(customLogger?: Logger) {
     return res.json(updated);
   });
 
-  app.get("/recurring-support/:id", requireAuth, async (req, res) => {
+  v1Router.get("/recurring-support/:id", requireAuth, async (req, res) => {
     const { id } = req.params;
 
     const user = await prisma.user.findFirst({ where: { email: req.auth!.walletAddress } });
@@ -2336,7 +2356,7 @@ export function createApp(customLogger?: Logger) {
     return res.json(subscription);
   });
 
-  app.delete("/recurring-support/:id", requireAuth, async (req, res) => {
+  v1Router.delete("/recurring-support/:id", requireAuth, async (req, res) => {
     const { id } = req.params;
 
     const user = await prisma.user.findFirst({ where: { email: req.auth!.walletAddress } });
@@ -2351,7 +2371,7 @@ export function createApp(customLogger?: Logger) {
     return res.status(204).send();
   });
 
-  app.get("/profiles/:username/analytics/timeseries", async (req, res) => {
+  v1Router.get("/profiles/:username/analytics/timeseries", async (req, res) => {
     const { username } = req.params;
     const period = (req.query.period as string) || "daily";
     const assetCode = req.query.assetCode as string | undefined;
@@ -2433,7 +2453,7 @@ export function createApp(customLogger?: Logger) {
     return res.json(formatted);
   });
 
-  app.get("/profiles/:username/analytics/assets", async (req, res) => {
+  v1Router.get("/profiles/:username/analytics/assets", async (req, res) => {
     const { username } = req.params;
 
     const profile = await prisma.profile.findUnique({ where: { username } });
@@ -2459,6 +2479,23 @@ export function createApp(customLogger?: Logger) {
 
     return res.json({ breakdown, total: Number(total.toFixed(7)) });
   });
+
+  // ── Mount v1 router ───────────────────────────────────────────────────
+  // Primary versioned endpoint: /v1/...
+  app.use("/v1", v1Router);
+
+  // ── Deprecated unversioned aliases ────────────────────────────────────
+  // Keep old routes working but signal deprecation via headers.
+  // Clients should migrate to /v1/... endpoints.
+  const deprecationDate = "Sat, 01 Jan 2027 00:00:00 GMT";
+  const deprecationLink = '</v1>; rel="successor-version"';
+
+  app.use((req, res, next) => {
+    res.setHeader("Deprecation", deprecationDate);
+    res.setHeader("Link", deprecationLink);
+    res.setHeader("Sunset", deprecationDate);
+    next();
+  }, v1Router);
 
   return app;
 }
