@@ -17,6 +17,7 @@ The initial contract is intentionally small:
 The contract now includes comprehensive error codes for better debugging and user experience. See [ERROR_CODES.md](ERROR_CODES.md) for detailed documentation of all error codes and their meanings.
 
 Key error categories:
+
 - **Input validation errors** (1-99): Invalid amounts, messages, asset codes
 - **Authorization errors** (100-199): Admin access, recipient permissions
 - **Contract state errors** (200-299): Initialization, pause state
@@ -35,11 +36,11 @@ The MVP only needs to show clear Soroban intent for the Stellar Wave submission.
 
 ## Deployed Contract (Testnet)
 
-| Field | Value |
-|---|---|
-| Contract ID | `NEXT_PUBLIC_CONTRACT_ID` (set in `frontend/.env.local`) |
-| Network | Stellar Testnet |
-| Explorer | https://stellar.expert/explorer/testnet/contract/&lt;id&gt; |
+| Field       | Value                                                       |
+| ----------- | ----------------------------------------------------------- |
+| Contract ID | `NEXT_PUBLIC_CONTRACT_ID` (set in `frontend/.env.local`)    |
+| Network     | Stellar Testnet                                             |
+| Explorer    | https://stellar.expert/explorer/testnet/contract/&lt;id&gt; |
 
 The contract ID is recorded in `frontend/.env.example` as `NEXT_PUBLIC_CONTRACT_ID`. After deploying, set the actual ID in `frontend/.env.local` (not committed) and update this table with the deployed contract ID and deployer address.
 
@@ -53,12 +54,197 @@ If deployment or invocation fails, check the following first:
 - Check the deployer and supporter addresses in Stellar Expert:
   https://stellar.expert/explorer/testnet/contract/<CONTRACT_ID>
 
-Common failures:
+### Common Deployment Errors
 
-- `ContractNotInitialized` usually means `initialize()` has not been called yet.
-- `ContractPaused` means the admin paused support calls.
-- `InsufficientBalance` means the supporter account does not have enough of the selected asset.
-- `MessageTooLong` or `InvalidAssetCode` means the request data does not match the contract validation rules.
+#### Error: "account not found"
+
+**Cause:** The deployer account doesn't exist or isn't funded on the target network.
+
+**Solution:**
+
+```bash
+# Fund your testnet account using Friendbot
+curl "https://friendbot.stellar.org?addr=YOUR_PUBLIC_KEY"
+
+# Or use the Stellar Laboratory
+# https://laboratory.stellar.org/#account-creator?network=test
+```
+
+#### Error: "insufficient balance" or "tx_insufficient_balance"
+
+**Cause:** The account doesn't have enough XLM to cover the deployment fee and minimum balance.
+
+**Solution:** Ensure your account has at least 10 XLM for testnet deployments. Deployment typically costs 0.1-1 XLM depending on contract size.
+
+#### Error: "wasm file not found"
+
+**Cause:** The WASM file wasn't built or is in the wrong location.
+
+**Solution:**
+
+```bash
+# Rebuild the contract
+cd contract
+stellar contract build
+
+# Verify the WASM exists
+ls -lh target/wasm32-unknown-unknown/release/*.wasm
+```
+
+#### Error: "contract already exists" or "ContractAlreadyExists"
+
+**Cause:** Trying to deploy with the same WASM hash that's already deployed.
+
+**Solution:** This is usually fine - you can reuse the existing contract ID. If you need a fresh instance, modify the contract code slightly or use a different deployer account.
+
+#### Error: "transaction malformed" or "tx_bad_seq"
+
+**Cause:** Sequence number mismatch or network connectivity issues.
+
+**Solution:**
+
+```bash
+# Check your network configuration
+stellar config network list
+
+# Verify you're using the correct network
+stellar config network current
+
+# Try again with explicit network flag
+stellar contract deploy --network testnet --source mykey --wasm <path>
+```
+
+### Common Invocation Errors
+
+#### Error: "ContractNotInitialized"
+
+**Cause:** The `initialize()` function hasn't been called yet.
+
+**Solution:**
+
+```bash
+stellar contract invoke \
+  --id <CONTRACT_ID> \
+  --network testnet \
+  --source mykey \
+  -- initialize \
+  --admin <ADMIN_ADDRESS>
+```
+
+#### Error: "ContractPaused"
+
+**Cause:** The admin paused support calls.
+
+**Solution:** Contact the contract admin to unpause, or if you're the admin:
+
+```bash
+stellar contract invoke \
+  --id <CONTRACT_ID> \
+  --network testnet \
+  --source admin-key \
+  -- unpause
+```
+
+#### Error: "InsufficientBalance"
+
+**Cause:** The supporter account doesn't have enough of the selected asset.
+
+**Solution:** Fund the supporter account with the required asset. For XLM:
+
+```bash
+curl "https://friendbot.stellar.org?addr=SUPPORTER_ADDRESS"
+```
+
+#### Error: "MessageTooLong"
+
+**Cause:** The support message exceeds the maximum allowed length (typically 280 characters).
+
+**Solution:** Shorten the message and try again.
+
+#### Error: "InvalidAssetCode"
+
+**Cause:** The asset code doesn't match the contract validation rules (1-12 alphanumeric characters).
+
+**Solution:** Use a valid asset code like "XLM", "USDC", or "AQUA".
+
+#### Error: "Unauthorized" or "NotAdmin"
+
+**Cause:** Trying to call an admin-only function without admin privileges.
+
+**Solution:** Ensure you're using the admin keypair that was set during initialization.
+
+### Network and RPC Issues
+
+#### Error: "connection refused" or "network timeout"
+
+**Cause:** Can't reach the Soroban RPC endpoint.
+
+**Solution:**
+
+```bash
+# Check RPC endpoint status
+curl https://soroban-testnet.stellar.org/health
+
+# Try alternative RPC endpoints
+stellar config network add testnet-alt \
+  --rpc-url https://rpc-testnet.stellar.org \
+  --network-passphrase "Test SDF Network ; September 2015"
+
+# Use the alternative network
+stellar contract invoke --network testnet-alt ...
+```
+
+#### Error: "rate limit exceeded"
+
+**Cause:** Too many requests to the public RPC endpoint.
+
+**Solution:**
+
+- Wait a few minutes and try again
+- Use your own RPC node
+- Batch multiple operations together
+- Consider using a paid RPC provider for production
+
+### Debugging Tips
+
+1. **Enable verbose logging:**
+
+   ```bash
+   RUST_LOG=debug stellar contract invoke ...
+   ```
+
+2. **Check transaction in Stellar Expert:**
+   - Go to https://stellar.expert/explorer/testnet
+   - Search for your transaction hash
+   - Review the operations and error details
+
+3. **Verify contract state:**
+
+   ```bash
+   # Check if contract is initialized
+   stellar contract invoke --id <CONTRACT_ID> --network testnet -- is_initialized
+
+   # Check pause status
+   stellar contract invoke --id <CONTRACT_ID> --network testnet -- is_paused
+   ```
+
+4. **Test with Stellar Laboratory:**
+   - Use https://laboratory.stellar.org to manually build and submit transactions
+   - Helpful for debugging parameter encoding issues
+
+5. **Check contract events:**
+   ```bash
+   stellar contract events --id <CONTRACT_ID> --network testnet --count 10
+   ```
+
+### Getting Help
+
+If you're still stuck:
+
+1. Check the [Stellar Discord](https://discord.gg/stellar) #soroban channel
+2. Review [Soroban documentation](https://developers.stellar.org/docs/smart-contracts)
+3. Search [Stellar Stack Exchange](https://stellar.stackexchange.com/)
+4. File an issue in the [NovaSupport repository](https://github.com/your-org/novasupport/issues)
 
 ## Verification
 
@@ -193,6 +379,7 @@ const preparedTx = await server.prepareTransaction(tx);
 Follow these steps to build the WASM and deploy the contract to Stellar Testnet.
 
 **Prerequisites:**
+
 - Rust stable toolchain with `wasm32-unknown-unknown` target.
 - Stellar CLI installed (`cargo install --locked stellar-cli`).
 - A funded Testnet account (e.g., `mykey`).
@@ -216,6 +403,7 @@ After a successful deploy, the CLI will print the **Contract ID**. Update your f
 **The NovaSupport contract is immutable once deployed.** There is no built-in "upgrade" function or admin key that can swap the WASM code for an existing Contract ID.
 
 To "upgrade" the contract:
+
 1. **Deploy a new instance:** Re-run the deployment steps with your updated WASM. This will generate a **new Contract ID**.
 2. **Update the Frontend:** Point your frontend application to the new Contract ID.
 3. **State Migration:** If the old contract has critical state (like `support_count`) that must be preserved, you must:
@@ -236,7 +424,58 @@ Soroban contracts are immutable once deployed, so rollback means moving traffic 
 
 If the bad contract already received support events, preserve the old ID for auditability even after cutting over.
 
-Notes
+### Rollback Checklist
 
-- If you prefer a browser-based alternative for funding testnet accounts, see: https://laboratory.stellar.org
+Before rolling back to a previous contract version:
+
+- [ ] Identify the last known-good contract ID and source commit
+- [ ] Verify the WASM hash matches the source code
+- [ ] Deploy the new contract instance to testnet first
+- [ ] Test critical functions (initialize, support, withdraw) on testnet
+- [ ] Update environment variables in all services:
+  - `frontend/.env.local` → `NEXT_PUBLIC_CONTRACT_ID`
+  - `backend/.env` → `SOROBAN_CONTRACT_ID` or `CONTRACT_ID`
+- [ ] Restart backend indexer to begin tracking the new contract
+- [ ] Monitor Stellar Expert for the first few transactions
+- [ ] Document the incident and root cause for future reference
+
+### Emergency Rollback Script
+
+```bash
+#!/bin/bash
+# emergency-rollback.sh - Quick rollback to previous contract
+
+OLD_CONTRACT_ID="<CURRENT_BAD_CONTRACT_ID>"
+NEW_CONTRACT_ID="<NEWLY_DEPLOYED_CONTRACT_ID>"
+
+echo "Rolling back from $OLD_CONTRACT_ID to $NEW_CONTRACT_ID"
+
+# Update frontend
+sed -i "s/$OLD_CONTRACT_ID/$NEW_CONTRACT_ID/g" frontend/.env.local
+
+# Update backend
+sed -i "s/$OLD_CONTRACT_ID/$NEW_CONTRACT_ID/g" backend/.env
+
+# Restart services (adjust for your deployment)
+# pm2 restart backend
+# vercel --prod  # or your frontend deployment command
+
+echo "Rollback complete. Verify at:"
+echo "https://stellar.expert/explorer/testnet/contract/$NEW_CONTRACT_ID"
+```
+
+Make the script executable: `chmod +x emergency-rollback.sh`
+
+## Resources
+
+- **Stellar Laboratory:** https://laboratory.stellar.org (browser-based testnet account funding and transaction builder)
+- **Stellar Expert:** https://stellar.expert/explorer/testnet (blockchain explorer for verifying transactions and contract state)
+- **Soroban CLI Docs:** https://developers.stellar.org/docs/tools/developer-tools/cli (official CLI documentation)
+- **Horizon API Reference:** https://developers.stellar.org/api/horizon (REST API for querying Stellar network)
+
+## Security Notes
+
 - Keep your deploy key secure; consider using ephemeral or CI-specific keys for automated deploys.
+- Never commit private keys or seed phrases to version control.
+- Use hardware wallets or secure key management systems for production deployments.
+- Verify WASM hashes before deploying to production-like environments.

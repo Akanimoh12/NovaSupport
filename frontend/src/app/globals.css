@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
+  color-scheme: light dark;
 }
 
 body {
@@ -13,6 +13,17 @@ body {
     radial-gradient(circle at right, rgba(255, 200, 87, 0.12), transparent 24%),
     linear-gradient(180deg, #081426 0%, #06101d 100%);
   color: #f4f9ff;
+  transition:
+    background 0.3s ease,
+    color 0.3s ease;
+}
+
+.dark body {
+  background:
+    radial-gradient(circle at top, rgba(165, 255, 214, 0.25), transparent 35%),
+    radial-gradient(circle at right, rgba(255, 200, 87, 0.18), transparent 30%),
+    linear-gradient(180deg, #000000 0%, #0a0a0a 100%);
+  color: #ffffff;
 }
 
 a {
@@ -23,4 +34,3 @@ a {
 * {
   box-sizing: border-box;
 }
-
