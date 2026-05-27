@@ -168,6 +168,9 @@ impl SupportPageContract {
         }
 
         // Validate message length (max 280 characters like Twitter)
+        if m.len() == 0 {
+            return Err(Error::EmptyMessage);
+        }
         if m.len() > 280 {
             return Err(Error::MessageTooLong);
         }
@@ -831,6 +834,169 @@ mod test {
         client.initialize(&admin);
 
         // Try to withdraw without any support received
+        client.withdraw(&recipient, &recipient, &asset, &1000_i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #4)")] // Error::EmptyMessage
+    fn support_with_empty_message() {
+        let e = Env::default();
+        e.mock_all_auths();
+        let contract_id = e.register(SupportPageContract, ());
+        let client = SupportPageContractClient::new(&e, &contract_id);
+
+        let supporter = Address::generate(&e);
+        let recipient = Address::generate(&e);
+        let admin = Address::generate(&e);
+        let asset = e
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+        let token_admin = soroban_sdk::token::StellarAssetClient::new(&e, &asset);
+        token_admin.mint(&supporter, &10_000_i128);
+
+        client.initialize(&admin);
+
+        client.support(
+            &supporter,
+            &recipient,
+            &asset,
+            &1000_i128,
+            &String::from_str(&e, "XLM"),
+            &String::from_str(&e, ""),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #300)")] // Error::InsufficientBalance
+    fn support_with_insufficient_balance() {
+        let e = Env::default();
+        e.mock_all_auths();
+        let contract_id = e.register(SupportPageContract, ());
+        let client = SupportPageContractClient::new(&e, &contract_id);
+
+        let supporter = Address::generate(&e);
+        let recipient = Address::generate(&e);
+        let admin = Address::generate(&e);
+        let asset = e
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+        let token_admin = soroban_sdk::token::StellarAssetClient::new(&e, &asset);
+        token_admin.mint(&supporter, &100_i128);
+
+        client.initialize(&admin);
+
+        client.support(
+            &supporter,
+            &recipient,
+            &asset,
+            &10_000_i128,
+            &String::from_str(&e, "XLM"),
+            &String::from_str(&e, "More than balance"),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #2)")] // Error::ZeroAmount
+    fn withdraw_zero_amount() {
+        let e = Env::default();
+        e.mock_all_auths();
+        let contract_id = e.register(SupportPageContract, ());
+        let client = SupportPageContractClient::new(&e, &contract_id);
+
+        let supporter = Address::generate(&e);
+        let recipient = Address::generate(&e);
+        let admin = Address::generate(&e);
+        let asset = e
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+
+        let token_admin = soroban_sdk::token::StellarAssetClient::new(&e, &asset);
+        token_admin.mint(&supporter, &10_000_i128);
+
+        client.initialize(&admin);
+        client.support(
+            &supporter,
+            &recipient,
+            &asset,
+            &5_000_i128,
+            &String::from_str(&e, "XLM"),
+            &String::from_str(&e, "Setup support"),
+        );
+
+        client.withdraw(&recipient, &recipient, &asset, &0_i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #3)")] // Error::NegativeAmount
+    fn withdraw_negative_amount() {
+        let e = Env::default();
+        e.mock_all_auths();
+        let contract_id = e.register(SupportPageContract, ());
+        let client = SupportPageContractClient::new(&e, &contract_id);
+
+        let supporter = Address::generate(&e);
+        let recipient = Address::generate(&e);
+        let admin = Address::generate(&e);
+        let asset = e
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+
+        let token_admin = soroban_sdk::token::StellarAssetClient::new(&e, &asset);
+        token_admin.mint(&supporter, &10_000_i128);
+
+        client.initialize(&admin);
+        client.support(
+            &supporter,
+            &recipient,
+            &asset,
+            &5_000_i128,
+            &String::from_str(&e, "XLM"),
+            &String::from_str(&e, "Setup support"),
+        );
+
+        client.withdraw(&recipient, &recipient, &asset, &-1000_i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #101)")] // Error::NotAdmin
+    fn non_admin_cannot_unpause() {
+        let e = Env::default();
+        e.mock_all_auths();
+        let contract_id = e.register(SupportPageContract, ());
+        let client = SupportPageContractClient::new(&e, &contract_id);
+
+        let admin = Address::generate(&e);
+        let intruder = Address::generate(&e);
+
+        client.initialize(&admin);
+        client.pause(&admin);
+        client.unpause(&intruder);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #201)")] // Error::ContractNotInitialized
+    fn pause_without_initialization() {
+        let e = Env::default();
+        e.mock_all_auths();
+        let contract_id = e.register(SupportPageContract, ());
+        let client = SupportPageContractClient::new(&e, &contract_id);
+
+        let caller = Address::generate(&e);
+
+        client.pause(&caller);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #201)")] // Error::ContractNotInitialized
+    fn withdraw_without_initialization() {
+        let e = Env::default();
+        e.mock_all_auths();
+        let contract_id = e.register(SupportPageContract, ());
+        let client = SupportPageContractClient::new(&e, &contract_id);
+
+        let recipient = Address::generate(&e);
+        let asset = Address::generate(&e);
+
         client.withdraw(&recipient, &recipient, &asset, &1000_i128);
     }
 }
