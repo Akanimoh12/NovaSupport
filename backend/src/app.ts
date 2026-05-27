@@ -727,6 +727,15 @@ All errors return JSON with an \`error\` field and optional \`code\`:
    *           type: string
    *           example: XLM
    *         description: Filter by accepted asset code (e.g., XLM, USDC)
+   *       - in: query
+   *         name: assetIssuer
+   *         schema:
+   *           type: string
+   *           example: GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3THOJ2E37CEGOEZWDSP
+   *         description: >
+   *           Filter by asset issuer address. Use together with `asset` to distinguish
+   *           different issuers of the same asset code (e.g., Circle USDC vs another USDC).
+   *           Omit or leave empty to return profiles accepting any issuer of the given asset.
    *     responses:
    *       200:
    *         description: List of profiles
@@ -3403,12 +3412,20 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     return res.json(subscriptions);
   });
 
-  v1Router.patch("/recurring-support/:id", requireAuth, async (req, res) => {
-    const { id } = req.params;
-    const { status } = req.body;
+  const patchRecurringSupportSchema = z.object({
+    status: z.enum(["active", "paused", "cancelled"]).optional(),
+    frequency: z.enum(["weekly", "monthly"]).optional(),
+    amount: z.string().min(1).optional(),
+  }).refine((data) => data.status || data.frequency || data.amount, {
+    message: "At least one of status, frequency, or amount is required",
+  });
 
-    if (!status || (status !== "paused" && status !== "cancelled")) {
-      return sendError(res, 400, "status must be 'paused' or 'cancelled'");
+  v1Router.patch("/recurring-support/:id", requireAuth, writeLimiter, async (req, res) => {
+    const { id } = req.params;
+
+    const parsed = patchRecurringSupportSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return sendError(res, 400, parsed.error.errors[0]?.message ?? "Invalid request body");
     }
 
     const user = await prisma.user.findFirst({ where: { email: req.auth!.walletAddress } });
@@ -3418,7 +3435,28 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     if (!subscription) return sendError(res, 404, "Recurring support not found");
     if (subscription.supporterId !== user.id) return sendError(res, 403, "Forbidden");
 
-    const updated = await prisma.recurringSupport.update({ where: { id: id as string }, data: { status } });
+    const { status, frequency, amount } = parsed.data;
+
+    // Recalculate nextRunAt when frequency changes
+    let nextRunAt: Date | undefined;
+    if (frequency) {
+      nextRunAt = new Date();
+      if (frequency === "weekly") {
+        nextRunAt.setDate(nextRunAt.getDate() + 7);
+      } else {
+        nextRunAt.setDate(nextRunAt.getDate() + 30);
+      }
+    }
+
+    const updated = await prisma.recurringSupport.update({
+      where: { id: id as string },
+      data: {
+        ...(status ? { status } : {}),
+        ...(frequency ? { frequency } : {}),
+        ...(amount ? { amount } : {}),
+        ...(nextRunAt ? { nextRunAt } : {}),
+      },
+    });
 
     return res.json(updated);
   });
