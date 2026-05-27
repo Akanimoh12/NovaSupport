@@ -19,6 +19,7 @@ type Transaction = {
   createdAt: string;
   status: string;
   message?: string;
+  memo?: string | null;
 };
 
 export function ProfileTabs({ username }: { username: string }) {
@@ -92,6 +93,7 @@ export function ProfileTabs({ username }: { username: string }) {
                     <tr>
                       <th className="px-6 py-4">Status</th>
                       <th className="px-6 py-4">Amount</th>
+                      <th className="px-6 py-4">Memo</th>
                       <th className="px-6 py-4">Transaction</th>
                       <th className="px-6 py-4 text-right">Date</th>
                     </tr>
@@ -106,6 +108,15 @@ export function ProfileTabs({ username }: { username: string }) {
                         </td>
                         <td className="px-6 py-4">
                           <span className="text-white font-medium">{tx.amount} {tx.assetCode}</span>
+                        </td>
+                        <td className="px-6 py-4 max-w-[12rem]">
+                          {tx.memo ? (
+                            <span className="block truncate text-sky/80" title={tx.memo}>
+                              {tx.memo}
+                            </span>
+                          ) : (
+                            <span className="text-sky/30">-</span>
+                          )}
                         </td>
                         <td className="px-6 py-4">
                           <a 

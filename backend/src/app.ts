@@ -1384,6 +1384,13 @@ export function createApp(customLogger?: Logger) {
     assetIssuer: z.string().optional().nullable(),
     status: z.string().default("pending"),
     message: z.string().max(280).optional().nullable(),
+    memo: z
+      .string()
+      .refine((value) => Buffer.byteLength(value, "utf8") <= 28, {
+        message: "Text memo must be 28 bytes or fewer",
+      })
+      .optional()
+      .nullable(),
     stellarNetwork: z.string().default("TESTNET"),
     supporterAddress: z.string().optional().nullable(),
     recipientAddress: z.string().min(1),
@@ -1921,6 +1928,9 @@ export function createApp(customLogger?: Logger) {
    *                 type: string
    *                 maxLength: 280
    *                 description: Sanitized support message
+   *               memo:
+   *                 type: string
+   *                 description: Optional Stellar text memo, max 28 UTF-8 bytes
    *               stellarNetwork:
    *                 type: string
    *                 default: TESTNET
@@ -2083,6 +2093,7 @@ export function createApp(customLogger?: Logger) {
               amount: supportRecord.amount.toString(),
               assetCode: supportRecord.assetCode,
               message: supportRecord.message ?? null,
+              memo: supportRecord.memo ?? null,
               profileUsername: webhook.profile.username,
               createdAt: supportRecord.createdAt.toISOString(),
             });

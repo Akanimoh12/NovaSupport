@@ -413,6 +413,7 @@ export function SupportPanel({
                   recipientAddress: walletAddress,
                   profileId,
                   message: message || undefined,
+                  memo: message || undefined,
                 }),
               });
 

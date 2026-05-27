@@ -78,6 +78,7 @@ model SupportTransaction {
   assetIssuer      String?
   status           String
   message          String?
+  memo             String?
   stellarNetwork   String
   supporterAddress String?
   recipientAddress String
