@@ -171,7 +171,7 @@ export default function ExplorePage() {
                 <option value="">All Issuers</option>
                 {filteredIssuers.map((issuer) => (
                   <option key={issuer.issuer} value={issuer.issuer}>
-                    {issuer.issuer.slice(0, 8)}...
+                    {issuer.code} — {issuer.issuer.slice(0, 4)}…{issuer.issuer.slice(-4)}
                   </option>
                 ))}
               </select>
@@ -236,12 +236,22 @@ export default function ExplorePage() {
                     {profile.acceptedAssets.slice(0, 3).map((a, idx) => (
                       <span
                         key={idx}
-                        className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-mint/20 text-mint"
-                        title={a.issuer ? `Issuer: ${a.issuer}` : ""}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-mint/20 text-mint"
+                        title={a.issuer ? `Issuer: ${a.issuer}` : a.code}
                       >
                         {a.code}
+                        {a.issuer && (
+                          <span className="text-mint/50 font-normal">
+                            {a.issuer.slice(0, 4)}…{a.issuer.slice(-4)}
+                          </span>
+                        )}
                       </span>
                     ))}
+                    {profile.acceptedAssets.length > 3 && (
+                      <span className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-white/10 text-sky/60">
+                        +{profile.acceptedAssets.length - 3}
+                      </span>
+                    )}
                   </div>
                 </Link>
               ))}

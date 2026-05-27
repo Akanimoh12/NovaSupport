@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import pino from "pino";
 import { createApp } from "./app.js";
 import { prisma } from "./db.js";
+import { signJWT } from "./auth.js";
 import {
   sanitizeString,
   sanitizeObject,
@@ -679,6 +680,419 @@ async function main() {
     assert.deepEqual(query.tags, ["tag1", "tag2", "tag3"]);
     assert.equal(query.single, "value");
   });
+
+  // ── Recurring Support CRUD tests ──────────────────────────────────────
+
+  if (!hasDb) {
+    console.log("SKIP recurring-support CRUD tests (no DATABASE_URL)");
+  } else {
+    // Test 32: POST /recurring-support → creates a record and returns 201
+    await runTest("POST /recurring-support → creates record with 201", async () => {
+      const srv = await startTestServer(makeLogStream().stream);
+      let userId: string | undefined;
+      let profileId: string | undefined;
+
+      try {
+        // Create user whose email == walletAddress (matches requireAuth lookup)
+        const testWallet = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+        const user = await prisma.user.create({ data: { email: testWallet } });
+        userId = user.id;
+        const token = signJWT(testWallet, user.id);
+
+        const profile = await prisma.profile.create({
+          data: {
+            username: `recur-test-${randomUUID().slice(0, 8)}`,
+            displayName: "Recur Test",
+            bio: "",
+            walletAddress: testWallet,
+            ownerId: user.id,
+            acceptedAssets: { create: [{ code: "XLM" }] },
+          },
+        });
+        profileId = profile.id;
+
+        const res = await fetch(`${srv.baseUrl}/recurring-support`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            profileId,
+            amount: "10",
+            assetCode: "XLM",
+            frequency: "monthly",
+          }),
+        });
+
+        assert.equal(res.status, 201, `Expected 201, got ${res.status}`);
+        const body = await res.json() as { message: string };
+        assert.equal(body.message, "Recurring support created");
+      } finally {
+        await srv.close();
+        if (profileId) {
+          await prisma.recurringSupport.deleteMany({ where: { profileId } });
+          await prisma.acceptedAsset.deleteMany({ where: { profileId } });
+          await prisma.profile.deleteMany({ where: { id: profileId } });
+        }
+        if (userId) await prisma.user.deleteMany({ where: { id: userId } });
+      }
+    });
+
+    // Test 33: POST /recurring-support → invalid frequency returns 400
+    await runTest("POST /recurring-support → invalid frequency returns 400", async () => {
+      const srv = await startTestServer(makeLogStream().stream);
+      let userId: string | undefined;
+      let profileId: string | undefined;
+
+      try {
+        const testWallet = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+        const user = await prisma.user.create({ data: { email: testWallet } });
+        userId = user.id;
+        const token = signJWT(testWallet, user.id);
+
+        const profile = await prisma.profile.create({
+          data: {
+            username: `recur-freq-${randomUUID().slice(0, 8)}`,
+            displayName: "Recur Freq Test",
+            bio: "",
+            walletAddress: testWallet,
+            ownerId: user.id,
+            acceptedAssets: { create: [{ code: "XLM" }] },
+          },
+        });
+        profileId = profile.id;
+
+        const res = await fetch(`${srv.baseUrl}/recurring-support`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            profileId,
+            amount: "10",
+            frequency: "daily", // invalid
+          }),
+        });
+
+        assert.equal(res.status, 400, `Expected 400, got ${res.status}`);
+      } finally {
+        await srv.close();
+        if (profileId) {
+          await prisma.recurringSupport.deleteMany({ where: { profileId } });
+          await prisma.acceptedAsset.deleteMany({ where: { profileId } });
+          await prisma.profile.deleteMany({ where: { id: profileId } });
+        }
+        if (userId) await prisma.user.deleteMany({ where: { id: userId } });
+      }
+    });
+
+    // Test 34: GET /recurring-support/:id → returns the record
+    await runTest("GET /recurring-support/:id → returns record for owner", async () => {
+      const srv = await startTestServer(makeLogStream().stream);
+      let userId: string | undefined;
+      let profileId: string | undefined;
+      let recurringId: string | undefined;
+
+      try {
+        const testWallet = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+        const user = await prisma.user.create({ data: { email: testWallet } });
+        userId = user.id;
+        const token = signJWT(testWallet, user.id);
+
+        const profile = await prisma.profile.create({
+          data: {
+            username: `recur-get-${randomUUID().slice(0, 8)}`,
+            displayName: "Recur Get Test",
+            bio: "",
+            walletAddress: testWallet,
+            ownerId: user.id,
+            acceptedAssets: { create: [{ code: "XLM" }] },
+          },
+        });
+        profileId = profile.id;
+
+        const nextRunAt = new Date();
+        nextRunAt.setDate(nextRunAt.getDate() + 30);
+        const record = await prisma.recurringSupport.create({
+          data: {
+            supporterId: user.id,
+            profileId,
+            amount: "5",
+            assetCode: "XLM",
+            frequency: "monthly",
+            nextRunAt,
+          },
+        });
+        recurringId = record.id;
+
+        const res = await fetch(`${srv.baseUrl}/recurring-support/${recurringId}`, {
+          headers: { authorization: `Bearer ${token}` },
+        });
+
+        assert.equal(res.status, 200, `Expected 200, got ${res.status}`);
+        const body = await res.json() as { id: string; frequency: string };
+        assert.equal(body.id, recurringId);
+        assert.equal(body.frequency, "monthly");
+      } finally {
+        await srv.close();
+        if (recurringId) await prisma.recurringSupport.deleteMany({ where: { id: recurringId } });
+        if (profileId) {
+          await prisma.acceptedAsset.deleteMany({ where: { profileId } });
+          await prisma.profile.deleteMany({ where: { id: profileId } });
+        }
+        if (userId) await prisma.user.deleteMany({ where: { id: userId } });
+      }
+    });
+
+    // Test 35: PATCH /recurring-support/:id → updates frequency and recalculates nextRunAt
+    await runTest("PATCH /recurring-support/:id → updates frequency and amount", async () => {
+      const srv = await startTestServer(makeLogStream().stream);
+      let userId: string | undefined;
+      let profileId: string | undefined;
+      let recurringId: string | undefined;
+
+      try {
+        const testWallet = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+        const user = await prisma.user.create({ data: { email: testWallet } });
+        userId = user.id;
+        const token = signJWT(testWallet, user.id);
+
+        const profile = await prisma.profile.create({
+          data: {
+            username: `recur-patch-${randomUUID().slice(0, 8)}`,
+            displayName: "Recur Patch Test",
+            bio: "",
+            walletAddress: testWallet,
+            ownerId: user.id,
+            acceptedAssets: { create: [{ code: "XLM" }] },
+          },
+        });
+        profileId = profile.id;
+
+        const nextRunAt = new Date();
+        nextRunAt.setDate(nextRunAt.getDate() + 30);
+        const record = await prisma.recurringSupport.create({
+          data: {
+            supporterId: user.id,
+            profileId,
+            amount: "5",
+            assetCode: "XLM",
+            frequency: "monthly",
+            nextRunAt,
+          },
+        });
+        recurringId = record.id;
+
+        const res = await fetch(`${srv.baseUrl}/recurring-support/${recurringId}`, {
+          method: "PATCH",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ frequency: "weekly", amount: "15" }),
+        });
+
+        assert.equal(res.status, 200, `Expected 200, got ${res.status}`);
+        const body = await res.json() as { frequency: string; amount: string; nextRunAt: string };
+        assert.equal(body.frequency, "weekly");
+        assert.equal(body.amount, "15");
+        // nextRunAt should be ~7 days from now, not 30
+        const newNextRun = new Date(body.nextRunAt);
+        const diffDays = (newNextRun.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
+        assert.ok(diffDays < 10, `Expected nextRunAt within 10 days for weekly, got ${diffDays.toFixed(1)} days`);
+      } finally {
+        await srv.close();
+        if (recurringId) await prisma.recurringSupport.deleteMany({ where: { id: recurringId } });
+        if (profileId) {
+          await prisma.acceptedAsset.deleteMany({ where: { profileId } });
+          await prisma.profile.deleteMany({ where: { id: profileId } });
+        }
+        if (userId) await prisma.user.deleteMany({ where: { id: userId } });
+      }
+    });
+
+    // Test 36: PATCH /recurring-support/:id → empty body returns 400
+    await runTest("PATCH /recurring-support/:id → empty body returns 400", async () => {
+      const srv = await startTestServer(makeLogStream().stream);
+      let userId: string | undefined;
+      let profileId: string | undefined;
+      let recurringId: string | undefined;
+
+      try {
+        const testWallet = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+        const user = await prisma.user.create({ data: { email: testWallet } });
+        userId = user.id;
+        const token = signJWT(testWallet, user.id);
+
+        const profile = await prisma.profile.create({
+          data: {
+            username: `recur-empty-${randomUUID().slice(0, 8)}`,
+            displayName: "Recur Empty Test",
+            bio: "",
+            walletAddress: testWallet,
+            ownerId: user.id,
+            acceptedAssets: { create: [{ code: "XLM" }] },
+          },
+        });
+        profileId = profile.id;
+
+        const nextRunAt = new Date();
+        nextRunAt.setDate(nextRunAt.getDate() + 7);
+        const record = await prisma.recurringSupport.create({
+          data: {
+            supporterId: user.id,
+            profileId,
+            amount: "5",
+            assetCode: "XLM",
+            frequency: "weekly",
+            nextRunAt,
+          },
+        });
+        recurringId = record.id;
+
+        const res = await fetch(`${srv.baseUrl}/recurring-support/${recurringId}`, {
+          method: "PATCH",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({}),
+        });
+
+        assert.equal(res.status, 400, `Expected 400, got ${res.status}`);
+      } finally {
+        await srv.close();
+        if (recurringId) await prisma.recurringSupport.deleteMany({ where: { id: recurringId } });
+        if (profileId) {
+          await prisma.acceptedAsset.deleteMany({ where: { profileId } });
+          await prisma.profile.deleteMany({ where: { id: profileId } });
+        }
+        if (userId) await prisma.user.deleteMany({ where: { id: userId } });
+      }
+    });
+
+    // Test 37: DELETE /recurring-support/:id → cancels and returns 204
+    await runTest("DELETE /recurring-support/:id → returns 204", async () => {
+      const srv = await startTestServer(makeLogStream().stream);
+      let userId: string | undefined;
+      let profileId: string | undefined;
+
+      try {
+        const testWallet = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+        const user = await prisma.user.create({ data: { email: testWallet } });
+        userId = user.id;
+        const token = signJWT(testWallet, user.id);
+
+        const profile = await prisma.profile.create({
+          data: {
+            username: `recur-del-${randomUUID().slice(0, 8)}`,
+            displayName: "Recur Del Test",
+            bio: "",
+            walletAddress: testWallet,
+            ownerId: user.id,
+            acceptedAssets: { create: [{ code: "XLM" }] },
+          },
+        });
+        profileId = profile.id;
+
+        const nextRunAt = new Date();
+        nextRunAt.setDate(nextRunAt.getDate() + 7);
+        const record = await prisma.recurringSupport.create({
+          data: {
+            supporterId: user.id,
+            profileId,
+            amount: "5",
+            assetCode: "XLM",
+            frequency: "weekly",
+            nextRunAt,
+          },
+        });
+
+        const res = await fetch(`${srv.baseUrl}/recurring-support/${record.id}`, {
+          method: "DELETE",
+          headers: { authorization: `Bearer ${token}` },
+        });
+
+        assert.equal(res.status, 204, `Expected 204, got ${res.status}`);
+
+        // Confirm it no longer exists
+        const check = await prisma.recurringSupport.findUnique({ where: { id: record.id } });
+        assert.equal(check, null, "Record should be deleted");
+      } finally {
+        await srv.close();
+        if (profileId) {
+          await prisma.recurringSupport.deleteMany({ where: { profileId } });
+          await prisma.acceptedAsset.deleteMany({ where: { profileId } });
+          await prisma.profile.deleteMany({ where: { id: profileId } });
+        }
+        if (userId) await prisma.user.deleteMany({ where: { id: userId } });
+      }
+    });
+
+    // Test 38: GET /recurring-support/:id → 403 for non-owner
+    await runTest("GET /recurring-support/:id → 403 for non-owner", async () => {
+      const srv = await startTestServer(makeLogStream().stream);
+      let ownerUserId: string | undefined;
+      let otherUserId: string | undefined;
+      let profileId: string | undefined;
+      let recurringId: string | undefined;
+
+      try {
+        const ownerWallet = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+        const otherWallet = "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI";
+
+        const ownerUser = await prisma.user.create({ data: { email: ownerWallet } });
+        ownerUserId = ownerUser.id;
+        const otherUser = await prisma.user.create({ data: { email: otherWallet } });
+        otherUserId = otherUser.id;
+        const otherToken = signJWT(otherWallet, otherUser.id);
+
+        const profile = await prisma.profile.create({
+          data: {
+            username: `recur-403-${randomUUID().slice(0, 8)}`,
+            displayName: "Recur 403 Test",
+            bio: "",
+            walletAddress: ownerWallet,
+            ownerId: ownerUser.id,
+            acceptedAssets: { create: [{ code: "XLM" }] },
+          },
+        });
+        profileId = profile.id;
+
+        const nextRunAt = new Date();
+        nextRunAt.setDate(nextRunAt.getDate() + 30);
+        const record = await prisma.recurringSupport.create({
+          data: {
+            supporterId: ownerUser.id,
+            profileId,
+            amount: "5",
+            assetCode: "XLM",
+            frequency: "monthly",
+            nextRunAt,
+          },
+        });
+        recurringId = record.id;
+
+        // Other user tries to access owner's subscription
+        const res = await fetch(`${srv.baseUrl}/recurring-support/${recurringId}`, {
+          headers: { authorization: `Bearer ${otherToken}` },
+        });
+
+        assert.equal(res.status, 403, `Expected 403, got ${res.status}`);
+      } finally {
+        await srv.close();
+        if (recurringId) await prisma.recurringSupport.deleteMany({ where: { id: recurringId } });
+        if (profileId) {
+          await prisma.acceptedAsset.deleteMany({ where: { profileId } });
+          await prisma.profile.deleteMany({ where: { id: profileId } });
+        }
+        if (ownerUserId) await prisma.user.deleteMany({ where: { id: ownerUserId } });
+        if (otherUserId) await prisma.user.deleteMany({ where: { id: otherUserId } });
+      }
+    });
+  }
 
   if (hasDb) await prisma.$disconnect();
 }
