@@ -1675,6 +1675,142 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     },
   );
 
+  // ── GitHub profile import (#474) ──────────────────────────────────────
+
+  /**
+   * @openapi
+   * /profiles/{username}/import/github:
+   *   post:
+   *     summary: Import profile data from GitHub
+   *     description: |
+   *       Fetches the authenticated user's public GitHub profile and applies
+   *       displayName, bio, avatarUrl, websiteUrl, twitterHandle, and githubHandle
+   *       to the specified NovaSupport profile. The caller must own the profile.
+   *       Supply a personal access token in `githubToken` to avoid the 60 req/hr
+   *       unauthenticated rate limit; alternatively set GITHUB_TOKEN server-side.
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: username
+   *         required: true
+   *         schema:
+   *           type: string
+   *         description: NovaSupport username of the profile to update
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required:
+   *               - githubUsername
+   *             properties:
+   *               githubUsername:
+   *                 type: string
+   *                 description: GitHub username to import from
+   *                 example: octocat
+   *               githubToken:
+   *                 type: string
+   *                 description: Optional GitHub personal access token
+   *     responses:
+   *       200:
+   *         description: Profile updated with GitHub data
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 profile:
+   *                   type: object
+   *                   description: Updated profile
+   *                 imported:
+   *                   type: object
+   *                   description: Fields that were applied from GitHub
+   *       400:
+   *         description: Missing or invalid githubUsername
+   *       401:
+   *         description: Missing or invalid authentication
+   *       403:
+   *         description: Caller does not own this profile
+   *       404:
+   *         description: Profile or GitHub user not found
+   *       429:
+   *         description: GitHub API rate limit exceeded
+   *       503:
+   *         description: GitHub API unreachable
+   */
+  v1Router.post(
+    "/profiles/:username/import/github",
+    requireAuth,
+    writeLimiter,
+    async (req, res) => {
+      const importSchema = z.object({
+        githubUsername: z.string().min(1).max(39).regex(/^[a-zA-Z0-9-]+$/),
+        githubToken: z.string().optional(),
+      });
+
+      const parsed = importSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return sendError(res, 400, "githubUsername is required (1–39 alphanumeric/hyphen chars)");
+      }
+
+      const { githubUsername, githubToken } = parsed.data;
+      const { username } = req.params;
+
+      const profile = await prisma.profile.findUnique({ where: { username } });
+      if (!profile) {
+        return sendError(res, 404, "Profile not found");
+      }
+
+      if (!req.auth || req.auth.walletAddress !== profile.walletAddress) {
+        return sendError(res, 403, "Forbidden: You do not own this profile");
+      }
+
+      let ghData;
+      try {
+        const { fetchGitHubProfile, mapGitHubToNovaSupport, GitHubUserNotFoundError, GitHubRateLimitError } =
+          await import("./services/profile-importer.js");
+        ghData = mapGitHubToNovaSupport(await fetchGitHubProfile(githubUsername, githubToken));
+
+        const updated = await prisma.profile.update({
+          where: { username },
+          data: {
+            displayName: ghData.displayName,
+            bio: ghData.bio,
+            avatarUrl: ghData.avatarUrl,
+            websiteUrl: ghData.websiteUrl ?? undefined,
+            twitterHandle: ghData.twitterHandle ?? undefined,
+            githubHandle: ghData.githubHandle,
+          },
+          include: { acceptedAssets: true },
+        });
+
+        req.log.info(
+          { username, githubUsername },
+          "GitHub profile import applied",
+        );
+
+        return res.json({ profile: updated, imported: ghData });
+      } catch (e: unknown) {
+        if (e && typeof e === "object" && "name" in e) {
+          if ((e as { name: string }).name === "GitHubUserNotFoundError") {
+            return sendError(res, 404, `GitHub user '${githubUsername}' not found`);
+          }
+          if ((e as { name: string }).name === "GitHubRateLimitError") {
+            return sendError(res, 429, "GitHub API rate limit exceeded. Set GITHUB_TOKEN to increase limits.");
+          }
+          if ((e as { name: string }).name === "GitHubFetchError") {
+            req.log.error({ err: e, githubUsername }, "GitHub API error during profile import");
+            return sendError(res, 503, "Unable to reach GitHub API. Please try again later.");
+          }
+        }
+        req.log.error({ err: e, username, githubUsername }, "unexpected error during GitHub profile import");
+        return sendError(res, 500, "Internal server error");
+      }
+    },
+  );
+
   // ── Email verification (#275) ─────────────────────────────────────────
 
   v1Router.post("/profiles/:username/verify-email", async (req, res) => {

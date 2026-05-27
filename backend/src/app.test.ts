@@ -1094,6 +1094,313 @@ async function main() {
     });
   }
 
+  // ── Issue #445: Soroban event indexer startup ─────────────────────────
+  // Test 39: GET /indexer/status → returns configured:false when no contract ID set
+  await runTest("GET /indexer/status → configured:false with no SOROBAN_CONTRACT_ID", async () => {
+    const saved = process.env.SOROBAN_CONTRACT_ID;
+    delete process.env.SOROBAN_CONTRACT_ID;
+    delete process.env.CONTRACT_ID;
+    delete process.env.NEXT_PUBLIC_CONTRACT_ID;
+
+    const srv = await startTestServer(makeLogStream().stream);
+    try {
+      const res = await fetch(`${srv.baseUrl}/indexer/status`);
+      assert.equal(res.status, 200, `Expected 200, got ${res.status}`);
+      const body = await res.json() as { configured: boolean; contractId: null; cursor: null };
+      assert.equal(body.configured, false, "configured should be false");
+      assert.equal(body.contractId, null, "contractId should be null");
+      assert.equal(body.cursor, null, "cursor should be null");
+    } finally {
+      await srv.close();
+      if (saved !== undefined) process.env.SOROBAN_CONTRACT_ID = saved;
+    }
+  });
+
+  // Test 40: GET /indexer/status → returns configured:true when contract ID is set
+  await runTest("GET /indexer/status → configured:true when SOROBAN_CONTRACT_ID is set", async () => {
+    const saved = process.env.SOROBAN_CONTRACT_ID;
+    process.env.SOROBAN_CONTRACT_ID = "CTEST123CONTRACT";
+
+    const srv = await startTestServer(makeLogStream().stream);
+    try {
+      const res = await fetch(`${srv.baseUrl}/indexer/status`);
+      assert.equal(res.status, 200, `Expected 200, got ${res.status}`);
+      const body = await res.json() as { configured: boolean; contractId: string; network: string };
+      assert.equal(body.configured, true, "configured should be true");
+      assert.equal(body.contractId, "CTEST123CONTRACT");
+      assert.ok(body.network, "network field should be present");
+    } finally {
+      await srv.close();
+      if (saved !== undefined) process.env.SOROBAN_CONTRACT_ID = saved;
+      else delete process.env.SOROBAN_CONTRACT_ID;
+    }
+  });
+
+  // ── Issue #436: Transaction verification error handling ───────────────
+  // Test 41: POST /support-transactions → 401 without auth token
+  await runTest("POST /support-transactions → 401 without auth", async () => {
+    const srv = await startTestServer(makeLogStream().stream);
+    try {
+      const res = await fetch(`${srv.baseUrl}/support-transactions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ txHash: "abc", amount: "10", assetCode: "XLM", recipientAddress: "G123", profileId: "p1" }),
+      });
+      assert.equal(res.status, 401, `Expected 401, got ${res.status}`);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  // Test 42: POST /support-transactions → 400 on schema validation failure
+  await runTest("POST /support-transactions → 400 when required fields missing", async () => {
+    const srv = await startTestServer(makeLogStream().stream);
+    try {
+      // Sign in to get a token
+      const token = signJWT(walletAddress, "fake-user-id");
+      const res = await fetch(`${srv.baseUrl}/support-transactions`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ txHash: "ab" }), // too short, missing required fields
+      });
+      assert.equal(res.status, 400, `Expected 400, got ${res.status}`);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  // ── Issue #447: Leaderboard caching ──────────────────────────────────
+  if (hasDb) {
+    // Test 43: GET /profiles/:username/leaderboard → returns correct structure
+    await runTest("GET /profiles/:username/leaderboard → returns leaderboard structure", async () => {
+      const srv = await startTestServer(makeLogStream().stream);
+      const userId = await seedUser();
+      const profileId = await seedProfile(userId);
+
+      try {
+        const profile = await prisma.profile.findUnique({ where: { id: profileId } });
+        const username = profile!.username;
+
+        // Seed a transaction so leaderboard has data
+        await prisma.supportTransaction.create({
+          data: {
+            txHash: `test-lb-${randomUUID()}`,
+            amount: "100",
+            assetCode: "XLM",
+            supporterAddress: "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI",
+            recipientAddress: walletAddress,
+            profileId,
+            stellarNetwork: "TESTNET",
+            status: "SUCCESS",
+          },
+        });
+
+        const res = await fetch(`${srv.baseUrl}/profiles/${username}/leaderboard?limit=10&offset=0&sort=total_amount`);
+        assert.equal(res.status, 200, `Expected 200, got ${res.status}`);
+        const body = await res.json() as { leaderboard: unknown[]; total: number; limit: number; offset: number; sort: string };
+        assert.ok(Array.isArray(body.leaderboard), "leaderboard should be an array");
+        assert.equal(body.limit, 10);
+        assert.equal(body.offset, 0);
+        assert.equal(body.sort, "total_amount");
+        assert.ok(typeof body.total === "number", "total should be a number");
+        assert.ok(body.leaderboard.length > 0, "leaderboard should have at least one entry");
+      } finally {
+        await srv.close();
+        await prisma.supportTransaction.deleteMany({ where: { profileId } });
+        await prisma.acceptedAsset.deleteMany({ where: { profileId } });
+        await prisma.profile.deleteMany({ where: { id: profileId } });
+        await prisma.user.deleteMany({ where: { id: userId } });
+      }
+    });
+
+    // Test 44: GET /profiles/:username/leaderboard → sort=transaction_count works
+    await runTest("GET /profiles/:username/leaderboard → sort=transaction_count returns correct order", async () => {
+      const srv = await startTestServer(makeLogStream().stream);
+      const userId = await seedUser();
+      const profileId = await seedProfile(userId);
+
+      try {
+        const profile = await prisma.profile.findUnique({ where: { id: profileId } });
+        const username = profile!.username;
+
+        const supporter1 = "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI";
+        const supporter2 = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+
+        // supporter1: 2 transactions of 10 each = 20 total, 2 count
+        // supporter2: 1 transaction of 100 = 100 total, 1 count
+        await prisma.supportTransaction.createMany({
+          data: [
+            { txHash: `tc-a-${randomUUID()}`, amount: "10", assetCode: "XLM", supporterAddress: supporter1, recipientAddress: walletAddress, profileId, stellarNetwork: "TESTNET", status: "SUCCESS" },
+            { txHash: `tc-b-${randomUUID()}`, amount: "10", assetCode: "XLM", supporterAddress: supporter1, recipientAddress: walletAddress, profileId, stellarNetwork: "TESTNET", status: "SUCCESS" },
+            { txHash: `tc-c-${randomUUID()}`, amount: "100", assetCode: "XLM", supporterAddress: supporter2, recipientAddress: walletAddress, profileId, stellarNetwork: "TESTNET", status: "SUCCESS" },
+          ],
+        });
+
+        const res = await fetch(`${srv.baseUrl}/profiles/${username}/leaderboard?sort=transaction_count&limit=10`);
+        assert.equal(res.status, 200, `Expected 200, got ${res.status}`);
+        const body = await res.json() as { leaderboard: { supporterAddress: string; transactionCount: number }[]; sort: string };
+        assert.equal(body.sort, "transaction_count");
+        // supporter1 should rank #1 by transaction count
+        assert.equal(body.leaderboard[0].supporterAddress, supporter1);
+        assert.equal(body.leaderboard[0].transactionCount, 2);
+      } finally {
+        await srv.close();
+        await prisma.supportTransaction.deleteMany({ where: { profileId } });
+        await prisma.acceptedAsset.deleteMany({ where: { profileId } });
+        await prisma.profile.deleteMany({ where: { id: profileId } });
+        await prisma.user.deleteMany({ where: { id: userId } });
+      }
+    });
+
+    // Test 45: GET /profiles/:username/leaderboard → cache returns same data on second call
+    await runTest("GET /profiles/:username/leaderboard → second request returns same cached data", async () => {
+      const srv = await startTestServer(makeLogStream().stream);
+      const userId = await seedUser();
+      const profileId = await seedProfile(userId);
+
+      try {
+        const profile = await prisma.profile.findUnique({ where: { id: profileId } });
+        const username = profile!.username;
+
+        await prisma.supportTransaction.create({
+          data: {
+            txHash: `cache-${randomUUID()}`,
+            amount: "50",
+            assetCode: "XLM",
+            supporterAddress: "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI",
+            recipientAddress: walletAddress,
+            profileId,
+            stellarNetwork: "TESTNET",
+            status: "SUCCESS",
+          },
+        });
+
+        const url = `${srv.baseUrl}/profiles/${username}/leaderboard?limit=5&offset=0&sort=total_amount`;
+        const first = await (await fetch(url)).json();
+        const second = await (await fetch(url)).json();
+
+        assert.deepStrictEqual(first, second, "Cached response should match first response");
+      } finally {
+        await srv.close();
+        await prisma.supportTransaction.deleteMany({ where: { profileId } });
+        await prisma.acceptedAsset.deleteMany({ where: { profileId } });
+        await prisma.profile.deleteMany({ where: { id: profileId } });
+        await prisma.user.deleteMany({ where: { id: userId } });
+      }
+    });
+  }
+
+  // ── Issue #474: Profile import from GitHub ────────────────────────────
+  // Test 46: POST /profiles/:username/import/github → 401 without auth
+  await runTest("POST /profiles/import/github → 401 without auth token", async () => {
+    const srv = await startTestServer(makeLogStream().stream);
+    try {
+      const res = await fetch(`${srv.baseUrl}/profiles/someuser/import/github`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ githubUsername: "octocat" }),
+      });
+      assert.equal(res.status, 401, `Expected 401, got ${res.status}`);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  // Test 47: POST /profiles/import/github → 400 with missing githubUsername
+  await runTest("POST /profiles/import/github → 400 when githubUsername missing", async () => {
+    const srv = await startTestServer(makeLogStream().stream);
+    try {
+      const token = signJWT(walletAddress, "fake-user-id");
+      const res = await fetch(`${srv.baseUrl}/profiles/someuser/import/github`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({}),
+      });
+      assert.equal(res.status, 400, `Expected 400, got ${res.status}`);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  // Test 48: POST /profiles/import/github → 400 with invalid githubUsername chars
+  await runTest("POST /profiles/import/github → 400 with invalid githubUsername format", async () => {
+    const srv = await startTestServer(makeLogStream().stream);
+    try {
+      const token = signJWT(walletAddress, "fake-user-id");
+      const res = await fetch(`${srv.baseUrl}/profiles/someuser/import/github`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ githubUsername: "bad user name!" }),
+      });
+      assert.equal(res.status, 400, `Expected 400, got ${res.status}`);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  if (hasDb) {
+    // Test 49: POST /profiles/import/github → 404 when NovaSupport profile not found
+    await runTest("POST /profiles/import/github → 404 when profile not found", async () => {
+      const srv = await startTestServer(makeLogStream().stream);
+      try {
+        const token = signJWT(walletAddress, "test-user-id");
+        const res = await fetch(`${srv.baseUrl}/profiles/nonexistent-profile-xyz/import/github`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ githubUsername: "octocat" }),
+        });
+        assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
+        const body = await res.json() as { error: string };
+        assert.ok(body.error.includes("not found"), `Expected 'not found' in error, got: ${body.error}`);
+      } finally {
+        await srv.close();
+      }
+    });
+
+    // Test 50: POST /profiles/import/github → 403 when caller does not own profile
+    await runTest("POST /profiles/import/github → 403 when caller is not profile owner", async () => {
+      const srv = await startTestServer(makeLogStream().stream);
+      const userId = await seedUser();
+      const profileId = await seedProfile(userId);
+
+      try {
+        const profile = await prisma.profile.findUnique({ where: { id: profileId } });
+        const username = profile!.username;
+
+        // A different wallet tries to import into this profile
+        const differentWallet = "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI";
+        const token = signJWT(differentWallet, "different-user-id");
+
+        const res = await fetch(`${srv.baseUrl}/profiles/${username}/import/github`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ githubUsername: "octocat" }),
+        });
+        assert.equal(res.status, 403, `Expected 403, got ${res.status}`);
+      } finally {
+        await srv.close();
+        await prisma.acceptedAsset.deleteMany({ where: { profileId } });
+        await prisma.profile.deleteMany({ where: { id: profileId } });
+        await prisma.user.deleteMany({ where: { id: userId } });
+      }
+    });
+  }
+
   if (hasDb) await prisma.$disconnect();
 }
 
