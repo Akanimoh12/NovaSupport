@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { QrCode, X } from "lucide-react";
+import { SITE_URL } from "@/lib/config";
 
 type QRCodeButtonProps = {
   username: string;
@@ -11,7 +12,7 @@ type QRCodeButtonProps = {
 export function QRCodeButton({ username }: QRCodeButtonProps) {
   const [open, setOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
-  const profileUrl = `https://novasupport.xyz/profile/${username}`;
+  const profileUrl = `${typeof window !== "undefined" ? window.location.origin : SITE_URL}/profile/${username}`;
 
   useEffect(() => {
     if (!open) return;

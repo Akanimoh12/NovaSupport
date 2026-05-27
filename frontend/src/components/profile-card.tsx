@@ -2,6 +2,7 @@
 import { useState, useCallback, KeyboardEvent } from "react";
 import { isValidStellarAddress } from "@/lib/stellar";
 import { useToast } from "@/lib/use-toast";
+import { SITE_URL } from "@/lib/config";
 
 import { ProfileCardSkeleton } from "./skeleton";
 
@@ -115,7 +116,7 @@ export function ProfileCard({
 
   const profileUrl = typeof window !== 'undefined' 
     ? `${window.location.origin}/profile/${username}`
-    : `https://novasupport.xyz/profile/${username}`;
+    : `${SITE_URL}/profile/${username}`;
 
   const handleCopyLink = useCallback(async () => {
     try {

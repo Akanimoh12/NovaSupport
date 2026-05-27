@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { SITE_URL } from "@/lib/config";
 
 type Asset = {
   code: string;
@@ -184,7 +185,7 @@ export function EmbedWidget({
       <p className={`text-center mt-2 ${t.muted}`} style={{ fontSize: "0.6rem" }}>
         Powered by{" "}
         <a
-          href="https://novasupport.xyz"
+          href={SITE_URL}
           target="_blank"
           rel="noopener noreferrer"
           className={t.accent}
@@ -208,7 +209,7 @@ export function EmbedCodeGenerator({ username }: EmbedCodeGeneratorProps) {
   const baseUrl =
     typeof window !== "undefined"
       ? window.location.origin
-      : "https://novasupport.xyz";
+      : SITE_URL;
 
   const iframeUrl = `${baseUrl}/embed/${username}?theme=${theme}&size=${size}`;
   const embedCode = `<iframe

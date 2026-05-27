@@ -94,16 +94,14 @@ export async function generateMetadata({
       title: `${profile.displayName} on NovaSupport`,
       description:
         profile.bio ?? `Support ${profile.displayName} on NovaSupport`,
-      images: profile.avatarUrl ? [profile.avatarUrl] : [],
-      url: `https://novasupport.xyz/profile/${params.username}`,
+      url: `${SITE_URL}/profile/${params.username}`,
       type: "profile",
     },
     twitter: {
-      card: "summary",
+      card: "summary_large_image",
       title: `${profile.displayName} on NovaSupport`,
       description:
         profile.bio ?? `Support ${profile.displayName} on NovaSupport`,
-      images: profile.avatarUrl ? [profile.avatarUrl] : [],
     },
     alternates: {
       types: {

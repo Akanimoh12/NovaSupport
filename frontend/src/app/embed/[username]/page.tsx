@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { EmbedWidget, type EmbedTheme, type EmbedSize } from "@/components/embed-widget";
-import { API_BASE_URL } from "@/lib/config";
+import { API_BASE_URL, SITE_URL } from "@/lib/config";
 
 type PageProps = {
   params: { username: string };
@@ -83,7 +83,7 @@ export default async function EmbedPage({ params, searchParams }: PageProps) {
         ? "large"
         : "medium";
 
-  const profileUrl = `https://novasupport.xyz/profile/${profile.username}`;
+  const profileUrl = `${SITE_URL}/profile/${profile.username}`;
 
   const recentSupporters = leaderboard.map((e) => ({
     supporterAddress: e.supporterAddress,
