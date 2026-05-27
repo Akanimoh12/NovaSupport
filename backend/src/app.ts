@@ -3493,6 +3493,94 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     return res.status(204).send();
   });
 
+  /**
+   * @openapi
+   * /profiles/{username}:
+   *   delete:
+   *     summary: Delete a profile
+   *     description: |
+   *       Permanently delete a profile and all related data (transactions, milestones, webhooks, etc.).
+   *       Requires authentication and ownership verification.
+   *       Cascading deletes are handled by Prisma schema.
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: username
+   *         required: true
+   *         schema:
+   *           type: string
+   *         description: Username of the profile to delete
+   *     responses:
+   *       204:
+   *         description: Profile deleted successfully
+   *       401:
+   *         description: Unauthorized - authentication required
+   *       403:
+   *         description: Forbidden - not the profile owner
+   *       404:
+   *         description: Profile not found
+   */
+  v1Router.delete("/profiles/:username", requireAuth, writeLimiter, async (req, res) => {
+    try {
+      const { username } = req.params;
+
+      const user = await prisma.user.findFirst({
+        where: { email: req.auth!.walletAddress },
+      });
+
+      if (!user) {
+        return sendError(res, 401, "User not found");
+      }
+
+      const profile = await prisma.profile.findUnique({
+        where: { username },
+        include: {
+          supportTransactions: { select: { id: true } },
+          recurringSupports: { select: { id: true } },
+          milestones: { select: { id: true } },
+          webhooks: { select: { id: true } },
+        },
+      });
+
+      if (!profile) {
+        return sendError(res, 404, "Profile not found");
+      }
+
+      if (profile.ownerId !== user.id) {
+        return sendError(res, 403, "You can only delete your own profile");
+      }
+
+      // Log deletion for audit trail
+      req.log.info({
+        username,
+        profileId: profile.id,
+        userId: user.id,
+        relatedRecords: {
+          transactions: profile.supportTransactions.length,
+          recurring: profile.recurringSupports.length,
+          milestones: profile.milestones.length,
+          webhooks: profile.webhooks.length,
+        },
+      }, "Profile deletion initiated");
+
+      // Delete profile (cascading deletes handled by Prisma schema)
+      await prisma.profile.delete({
+        where: { id: profile.id },
+      });
+
+      // Invalidate leaderboard cache
+      invalidateProfileLeaderboardCache();
+
+      req.log.info({ username, profileId: profile.id }, "Profile deleted successfully");
+
+      return res.status(204).send();
+    } catch (error) {
+      req.log.error({ err: error }, "Error deleting profile");
+      return sendError(res, 500, "Failed to delete profile");
+    }
+  });
+
   v1Router.get("/profiles/:username/analytics/timeseries", async (req, res) => {
     const { username } = req.params;
     const period = (req.query.period as string) || "daily";
