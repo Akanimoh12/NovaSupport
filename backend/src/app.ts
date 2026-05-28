@@ -179,14 +179,17 @@ function createRateLimiters() {
     },
   });
 
-  // Stricter limiter for profile creation: 3 per hour per IP (#276)
+  // Stricter limiter for profile creation: 3 per hour per IP (#316)
   const profileCreationLimiter = rateLimit({
     windowMs: 60 * 60 * 1000,
     limit: 3,
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: (req) => req.ip ?? "unknown",
-    message: { error: "Too many profiles created from this IP address. Please try again in an hour.", code: "RATE_LIMIT_EXCEEDED" },
+    message: {
+      error: "Too many profiles created from this IP address. You can create up to 3 profiles per hour. Please try again later.",
+      code: "PROFILE_CREATION_RATE_LIMIT_EXCEEDED",
+    },
   });
 
   const resendLimiter = rateLimit({
