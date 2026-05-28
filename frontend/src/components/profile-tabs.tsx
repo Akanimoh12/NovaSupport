@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
+import { EmptyState } from "./empty-state";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
@@ -19,6 +20,8 @@ type Transaction = {
   supporterAddress?: string;
   createdAt: string;
   status: string;
+//   message?: string;
+  memo?: string | null;
 };
 
 type Badge = {
@@ -273,6 +276,7 @@ export function ProfileTabs({ username }: { username: string }) {
                       <th className="px-6 py-4">Amount</th>
                       <th className="px-6 py-4">Supporter</th>
                       <th className="px-6 py-4">Message</th>
+                      <th className="px-6 py-4">Memo</th>
                       <th className="px-6 py-4">Transaction</th>
                       <th className="px-6 py-4 text-right">Date</th>
                     </tr>
@@ -305,6 +309,15 @@ export function ProfileTabs({ username }: { username: string }) {
                             <Highlight text={tx.message} query={search} />
                           ) : (
                             <span className="text-steel italic">—</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 max-w-[12rem]">
+                          {tx.memo ? (
+                            <span className="block truncate text-sky/80" title={tx.memo}>
+                              {tx.memo}
+                            </span>
+                          ) : (
+                            <span className="text-sky/30">-</span>
                           )}
                         </td>
                         <td className="px-6 py-4">
@@ -340,6 +353,11 @@ export function ProfileTabs({ username }: { username: string }) {
                   </>
                 )}
               </div>
+              <EmptyState
+                variant="transactions"
+                title="No transactions yet"
+                description="Be the first to support this creator!"
+              />
             )}
           </motion.div>
         ) : (
@@ -379,6 +397,11 @@ export function ProfileTabs({ username }: { username: string }) {
                 <p className="text-sm mt-1">Achievement badges will appear here once earned.</p>
               </div>
             )}
+            <EmptyState
+              variant="default"
+              title="Badges coming soon"
+              description="Achievement badges will appear here once earned. Start supporting creators to be eligible!"
+            />
           </motion.div>
         )}
       </AnimatePresence>

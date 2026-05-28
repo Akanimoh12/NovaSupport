@@ -1,0 +1,368 @@
+// Lightweight unit tests for the EventIndexer (#281).
+//
+// We don't have a Prisma test instance available in this PR, so the tests
+// drive the indexer with a hand-rolled mock that satisfies just the prisma
+// surface area the indexer touches. A future PR will add Postgres-backed
+// integration tests when the migration lands in CI.
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  EventIndexer,
+  type EventIndexerRpcClient,
+  type SupportEventRecord,
+} from "./event-indexer.js";
+
+interface CursorRow {
+  network: string;
+  contractId: string;
+  lastPagingToken: string;
+  lastLedger: number;
+  updatedAt: Date;
+  createdAt: Date;
+}
+
+function buildPrismaMock(): {
+  prisma: any;
+  cursors: CursorRow[];
+  txCalls: number;
+  insertedHashes: string[];
+  updatedHashes: string[];
+} {
+  const cursors: CursorRow[] = [];
+  const insertedHashes: string[] = [];
+  const updatedHashes: string[] = [];
+  let txCalls = 0;
+
+  const cursorClient = {
+    findUnique: async (args: { where: { network_contractId: { network: string; contractId: string } } }) => {
+      const key = args.where.network_contractId;
+      return cursors.find(
+        (c) => c.network === key.network && c.contractId === key.contractId,
+      ) ?? null;
+    },
+    upsert: async (args: {
+      where: { network_contractId: { network: string; contractId: string } };
+      create: any;
+      update: any;
+    }) => {
+      const key = args.where.network_contractId;
+      const idx = cursors.findIndex(
+        (c) => c.network === key.network && c.contractId === key.contractId,
+      );
+      const now = new Date();
+      if (idx === -1) {
+        const row: CursorRow = {
+          network: args.create.network,
+          contractId: args.create.contractId,
+          lastPagingToken: args.create.lastPagingToken,
+          lastLedger: args.create.lastLedger ?? 0,
+          updatedAt: now,
+          createdAt: now,
+        };
+        cursors.push(row);
+        return row;
+      }
+      const existing = cursors[idx]!;
+      Object.assign(existing, args.update, { updatedAt: now });
+      return existing;
+    },
+  };
+
+  const supportTxClient = {
+    upsert: async (args: { where: { txHash: string }; create: any; update: any }) => {
+      const existing = insertedHashes.includes(args.where.txHash);
+      if (existing) {
+        updatedHashes.push(args.where.txHash);
+        // Distinct timestamps so the "createdAt === updatedAt" heuristic
+        // counts this as an update, not a fresh insert.
+        return {
+          createdAt: new Date(2024, 0, 1),
+          updatedAt: new Date(2024, 0, 2),
+        };
+      }
+      insertedHashes.push(args.where.txHash);
+      const ts = new Date();
+      return { createdAt: ts, updatedAt: ts };
+    },
+  };
+
+  const prisma = {
+    indexerCursor: cursorClient,
+    supportTransaction: supportTxClient,
+    $transaction: async (cb: (tx: any) => Promise<unknown>) => {
+      txCalls += 1;
+      return cb({
+        indexerCursor: cursorClient,
+        supportTransaction: supportTxClient,
+      });
+    },
+  };
+
+  return {
+    prisma,
+    cursors,
+    get txCalls() {
+      return txCalls;
+    },
+    insertedHashes,
+    updatedHashes,
+  };
+}
+
+function event(overrides: Partial<SupportEventRecord> = {}): SupportEventRecord {
+  return {
+    txHash: "tx-hash-1",
+    ledger: 100,
+    pagingToken: "100-1",
+    amount: "10.0000000",
+    assetCode: "XLM",
+    assetIssuer: null,
+    recipientAddress: "GAAA",
+    supporterAddress: "GBBB",
+    message: "thanks",
+    emittedAt: new Date(),
+    ...overrides,
+  };
+}
+
+function rpc(pages: Array<{ events: SupportEventRecord[]; nextPagingToken: string | null }>): EventIndexerRpcClient {
+  let i = 0;
+  return {
+    async fetchEvents() {
+      const page = pages[i] ?? { events: [], nextPagingToken: null };
+      i = Math.min(i + 1, pages.length - 1);
+      return page;
+    },
+  };
+}
+
+await test("EventIndexer.pollOnce ingests events and advances the cursor", async () => {
+  const { prisma, cursors, insertedHashes } = buildPrismaMock();
+  const indexer = new EventIndexer({
+    prisma,
+    rpcClient: rpc([
+      {
+        events: [
+          event({ txHash: "tx-1", pagingToken: "100-1", ledger: 100 }),
+          event({ txHash: "tx-2", pagingToken: "100-2", ledger: 100 }),
+        ],
+        nextPagingToken: "100-2",
+      },
+    ]),
+    network: "TESTNET",
+    contractId: "C123",
+  });
+
+  const { ingested, nextCursor } = await indexer.pollOnce();
+  assert.equal(ingested, 2);
+  assert.equal(nextCursor, "100-2");
+  assert.deepEqual(insertedHashes, ["tx-1", "tx-2"]);
+  assert.equal(cursors.length, 1);
+  assert.equal(cursors[0]!.lastPagingToken, "100-2");
+  assert.equal(cursors[0]!.lastLedger, 100);
+});
+
+await test("EventIndexer.pollOnce treats duplicate tx hashes as no-ops (idempotent)", async () => {
+  const mock = buildPrismaMock();
+  // Pre-seed: tx-1 already ingested.
+  mock.insertedHashes.push("tx-1");
+
+  const indexer = new EventIndexer({
+    prisma: mock.prisma,
+    rpcClient: rpc([
+      {
+        events: [
+          event({ txHash: "tx-1", pagingToken: "100-1" }),
+          event({ txHash: "tx-2", pagingToken: "100-2" }),
+        ],
+        nextPagingToken: "100-2",
+      },
+    ]),
+    network: "TESTNET",
+    contractId: "C123",
+  });
+
+  const { ingested } = await indexer.pollOnce();
+  // Only tx-2 was new; tx-1 went down the update branch.
+  assert.equal(ingested, 1);
+  assert.deepEqual(mock.updatedHashes, ["tx-1"]);
+});
+
+await test("EventIndexer.pollOnce on empty page advances cursor only when RPC reports one", async () => {
+  const { prisma, cursors } = buildPrismaMock();
+  const indexer = new EventIndexer({
+    prisma,
+    rpcClient: rpc([{ events: [], nextPagingToken: "100-EMPTY" }]),
+    network: "TESTNET",
+    contractId: "C123",
+  });
+
+  const { ingested, nextCursor } = await indexer.pollOnce();
+  assert.equal(ingested, 0);
+  assert.equal(nextCursor, "100-EMPTY");
+  assert.equal(cursors[0]!.lastPagingToken, "100-EMPTY");
+});
+
+await test("EventIndexer.pollOnce on empty page with no RPC cursor leaves state untouched", async () => {
+  const { prisma, cursors } = buildPrismaMock();
+  const indexer = new EventIndexer({
+    prisma,
+    rpcClient: rpc([{ events: [], nextPagingToken: null }]),
+    network: "TESTNET",
+    contractId: "C123",
+  });
+
+  const { ingested, nextCursor } = await indexer.pollOnce();
+  assert.equal(ingested, 0);
+  assert.equal(nextCursor, null);
+  assert.equal(cursors.length, 0);
+});
+
+await test("EventIndexer.pollOnce reads pre-existing cursor before fetching", async () => {
+  const mock = buildPrismaMock();
+  mock.cursors.push({
+    network: "TESTNET",
+    contractId: "C123",
+    lastPagingToken: "200-5",
+    lastLedger: 200,
+    updatedAt: new Date(),
+    createdAt: new Date(),
+  });
+
+  let receivedCursor = "";
+  const rpcClient: EventIndexerRpcClient = {
+    async fetchEvents(args) {
+      receivedCursor = args.cursor;
+      return { events: [], nextPagingToken: null };
+    },
+  };
+
+  const indexer = new EventIndexer({
+    prisma: mock.prisma,
+    rpcClient,
+    network: "TESTNET",
+    contractId: "C123",
+  });
+  await indexer.pollOnce();
+  assert.equal(receivedCursor, "200-5");
+});
+
+await test("EventIndexer.pollOnce handles multi-page pagination by advancing cursor each page", async () => {
+  const { prisma, cursors, insertedHashes } = buildPrismaMock();
+
+  // Simulate two pages: page 1 has 2 events, page 2 has 1 event
+  const indexer = new EventIndexer({
+    prisma,
+    rpcClient: rpc([
+      {
+        events: [
+          event({ txHash: "tx-p1-1", pagingToken: "100-1", ledger: 100 }),
+          event({ txHash: "tx-p1-2", pagingToken: "100-2", ledger: 100 }),
+        ],
+        nextPagingToken: "100-2",
+      },
+      {
+        events: [
+          event({ txHash: "tx-p2-1", pagingToken: "101-1", ledger: 101 }),
+        ],
+        nextPagingToken: "101-1",
+      },
+    ]),
+    network: "TESTNET",
+    contractId: "C123",
+  });
+
+  // First poll — page 1
+  const result1 = await indexer.pollOnce();
+  assert.equal(result1.ingested, 2);
+  assert.equal(result1.nextCursor, "100-2");
+  assert.equal(cursors[0]!.lastPagingToken, "100-2");
+
+  // Second poll — page 2 (cursor was advanced)
+  const result2 = await indexer.pollOnce();
+  assert.equal(result2.ingested, 1);
+  assert.equal(result2.nextCursor, "101-1");
+  assert.equal(cursors[0]!.lastPagingToken, "101-1");
+
+  // All 3 unique hashes were inserted
+  assert.deepEqual(insertedHashes, ["tx-p1-1", "tx-p1-2", "tx-p2-1"]);
+});
+
+await test("EventIndexer.resolveOrphans links orphaned transactions to matching profiles", async () => {
+  const mock = buildPrismaMock();
+
+  // Seed an orphaned transaction
+  const orphanId = "orphan-tx-id";
+  const recipientAddress = "GAAA";
+  const profileId = "profile-123";
+
+  // Extend the mock to support the resolveOrphans queries
+  const orphans = [{ id: orphanId, recipientAddress }];
+  const profiles = [{ id: profileId, walletAddress: recipientAddress }];
+  const updatedIds: string[] = [];
+
+  mock.prisma.supportTransaction.findMany = async () => orphans;
+  mock.prisma.profile = {
+    findMany: async () => profiles,
+  };
+  mock.prisma.supportTransaction.update = async (args: { where: { id: string }; data: { profileId: string } }) => {
+    updatedIds.push(args.where.id);
+    return {};
+  };
+
+  const indexer = new EventIndexer({
+    prisma: mock.prisma,
+    rpcClient: rpc([]),
+    network: "TESTNET",
+    contractId: "C123",
+  });
+
+  const resolved = await indexer.resolveOrphans();
+  assert.equal(resolved, 1);
+  assert.deepEqual(updatedIds, [orphanId]);
+});
+
+await test("EventIndexer.resolveOrphans returns 0 when no orphans exist", async () => {
+  const mock = buildPrismaMock();
+  mock.prisma.supportTransaction.findMany = async () => [];
+
+  const indexer = new EventIndexer({
+    prisma: mock.prisma,
+    rpcClient: rpc([]),
+    network: "TESTNET",
+    contractId: "C123",
+  });
+
+  const resolved = await indexer.resolveOrphans();
+  assert.equal(resolved, 0);
+});
+
+await test("EventIndexer.stop prevents further ticks from being scheduled", async () => {
+  const { prisma } = buildPrismaMock();
+  let pollCount = 0;
+
+  const rpcClient: EventIndexerRpcClient = {
+    async fetchEvents() {
+      pollCount += 1;
+      return { events: [], nextPagingToken: null };
+    },
+  };
+
+  const indexer = new EventIndexer({
+    prisma,
+    rpcClient,
+    network: "TESTNET",
+    contractId: "C123",
+    pollIntervalMs: 10,
+  });
+
+  indexer.start();
+  // Let one tick fire
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  indexer.stop();
+  const countAfterStop = pollCount;
+  // Wait to confirm no more ticks fire after stop
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(pollCount, countAfterStop, "No more polls should fire after stop()");
+});

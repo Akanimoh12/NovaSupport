@@ -1,0 +1,146 @@
+import { describe, it, expect, vi, beforeAll } from "vitest";
+import { render } from "@testing-library/react";
+import { ThemeToggle } from "../theme-toggle";
+import { MilestoneCard } from "../milestone-card";
+import { EmbedWidget } from "../embed-widget";
+import { ActivityFeed } from "../activity-feed";
+import { NotificationPreferences } from "../notification-preferences";
+
+vi.mock("framer-motion", () => ({
+  motion: {
+    div: ({ children, ...props }: any) => <div {...props}>{children}</div>,
+  },
+  AnimatePresence: ({ children }: any) => <>{children}</>,
+}));
+
+vi.mock("lucide-react", () => ({
+  TrendingUp: () => <span>TrendingUp</span>,
+  Send: () => <span>Send</span>,
+  Award: () => <span>Award</span>,
+  RefreshCw: () => <span>RefreshCw</span>,
+  ChevronDown: () => <span>ChevronDown</span>,
+  Loader2: () => <span>Loader2</span>,
+  Trophy: () => <span>Trophy</span>,
+  Target: () => <span>Target</span>,
+  Sparkles: () => <span>Sparkles</span>,
+}));
+
+vi.mock("next/link", () => ({
+  default: ({ children, href }: any) => <a href={href}>{children}</a>,
+}));
+
+vi.mock("@/lib/config", () => ({
+  SITE_URL: "https://novasupport.app",
+  API_BASE_URL: "http://localhost:4000",
+}));
+
+vi.stubGlobal(
+  "fetch",
+  vi.fn().mockReturnValue(new Promise(() => {})),
+);
+
+beforeAll(() => {
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+});
+
+describe("Additional Component Snapshots", () => {
+  it("ThemeToggle matches snapshot", () => {
+    const { container } = render(<ThemeToggle />);
+    expect(container).toMatchSnapshot();
+  });
+
+  it("MilestoneCard matches snapshot (in-progress)", () => {
+    const milestone = {
+      id: "m1",
+      title: "New Equipment Fund",
+      description: "Raising funds for recording gear",
+      targetAmount: "1000",
+      currentAmount: "250",
+      assetCode: "XLM",
+      status: "active",
+      createdAt: "2024-01-01T00:00:00.000Z",
+    };
+    const { container } = render(<MilestoneCard milestone={milestone} index={0} />);
+    expect(container).toMatchSnapshot();
+  });
+
+  it("MilestoneCard matches snapshot (reached)", () => {
+    const milestone = {
+      id: "m2",
+      title: "Goal Reached!",
+      description: null,
+      targetAmount: "500",
+      currentAmount: "600",
+      assetCode: "XLM",
+      status: "reached",
+      createdAt: "2024-01-01T00:00:00.000Z",
+    };
+    const { container } = render(<MilestoneCard milestone={milestone} index={1} />);
+    expect(container).toMatchSnapshot();
+  });
+
+  it("EmbedWidget matches snapshot (dark theme, minimal props)", () => {
+    const { container } = render(
+      <EmbedWidget
+        username="johndoe"
+        displayName="John Doe"
+        bio="Stellar developer and content creator"
+        acceptedAssets={[{ code: "XLM" }]}
+        profileUrl="https://novasupport.app/johndoe"
+      />,
+    );
+    expect(container).toMatchSnapshot();
+  });
+
+  it("EmbedWidget matches snapshot (light theme, with stats)", () => {
+    const { container } = render(
+      <EmbedWidget
+        username="johndoe"
+        displayName="John Doe"
+        bio="Stellar developer"
+        acceptedAssets={[
+          { code: "XLM" },
+          { code: "USDC", issuer: "GBBD47IF6LWK7P7MDMSCR4XFM6KJLGMGR5E2Q3ZXZQ4KQQYT5R3332W" },
+        ]}
+        stats={{
+          totalTransactions: 42,
+          uniqueSupporters: 15,
+          assetTotals: [{ assetCode: "XLM", total: "1000.0000000" }],
+        }}
+        recentSupporters={[
+          {
+            supporterAddress: "GCZJM35NKGVK47BB4SPBDV25477PZYIYPVVG453LPYFNXLS3FGHDXOCM",
+            totalAmount: "100.0000000",
+            assetCode: "XLM",
+          },
+        ]}
+        theme="light"
+        size="large"
+        profileUrl="https://novasupport.app/johndoe"
+      />,
+    );
+    expect(container).toMatchSnapshot();
+  });
+
+  it("ActivityFeed matches snapshot (loading state)", () => {
+    const { container } = render(<ActivityFeed username="johndoe" limit={5} />);
+    expect(container).toMatchSnapshot();
+  });
+
+  it("NotificationPreferences matches snapshot (no auth token)", () => {
+    const { container } = render(<NotificationPreferences username="johndoe" />);
+    expect(container).toMatchSnapshot();
+  });
+});

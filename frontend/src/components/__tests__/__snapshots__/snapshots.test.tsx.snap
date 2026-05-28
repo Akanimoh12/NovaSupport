@@ -1,0 +1,274 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Component Snapshots > ProfileSkeleton matches snapshot 1`] = `
+<div>
+  <div
+    class="space-y-12 animate-fade-in"
+  >
+    <div
+      class="space-y-3"
+    >
+      <article
+        class="rounded-[2rem] border border-white/10 bg-white/[0.04] p-5 sm:p-7"
+      >
+        <div
+          class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"
+        >
+          <div
+            class="flex gap-4"
+          >
+            <div
+              class="animate-pulse bg-white/10 w-16 h-16 rounded-full"
+            />
+            <div
+              class="space-y-3"
+            >
+              <div
+                class="animate-pulse rounded-md bg-white/10 h-3 w-20"
+              />
+              <div
+                class="animate-pulse rounded-md bg-white/10 h-8 w-48 sm:w-64"
+              />
+              <div
+                class="space-y-2 mt-4"
+              >
+                <div
+                  class="animate-pulse rounded-md bg-white/10 h-4 w-full sm:w-[400px]"
+                />
+                <div
+                  class="animate-pulse rounded-md bg-white/10 h-4 w-3/4 sm:w-[300px]"
+                />
+              </div>
+              <div
+                class="mt-6 flex flex-wrap gap-8 items-center border-t border-white/5 pt-6"
+              >
+                <div
+                  class="space-y-2"
+                >
+                  <div
+                    class="animate-pulse rounded-md bg-white/10 h-3 w-24"
+                  />
+                  <div
+                    class="animate-pulse rounded-md bg-white/10 h-4 w-32"
+                  />
+                </div>
+                <div
+                  class="space-y-2"
+                >
+                  <div
+                    class="animate-pulse rounded-md bg-white/10 h-3 w-24"
+                  />
+                  <div
+                    class="animate-pulse rounded-md bg-white/10 h-4 w-32"
+                  />
+                </div>
+                <div
+                  class="space-y-2"
+                >
+                  <div
+                    class="animate-pulse rounded-md bg-white/10 h-3 w-24"
+                  />
+                  <div
+                    class="animate-pulse rounded-md bg-white/10 h-4 w-32"
+                  />
+                </div>
+              </div>
+              <div
+                class="mt-4 flex flex-wrap gap-2"
+              >
+                <div
+                  class="animate-pulse bg-white/10 h-8 w-24 rounded-full"
+                />
+                <div
+                  class="animate-pulse bg-white/10 h-8 w-32 rounded-full"
+                />
+              </div>
+            </div>
+          </div>
+          <div
+            class="w-full sm:w-48 h-24 rounded-3xl border border-white/5 bg-white/[0.02]"
+          />
+        </div>
+        <div
+          class="mt-8"
+        >
+          <div
+            class="animate-pulse rounded-md bg-white/10 h-4 w-32 mb-3"
+          />
+          <div
+            class="flex flex-wrap gap-3"
+          >
+            <div
+              class="animate-pulse bg-white/10 h-9 w-20 rounded-full"
+            />
+            <div
+              class="animate-pulse bg-white/10 h-9 w-20 rounded-full"
+            />
+            <div
+              class="animate-pulse bg-white/10 h-9 w-20 rounded-full"
+            />
+          </div>
+        </div>
+      </article>
+      <div
+        class="animate-pulse bg-white/10 h-10 w-full rounded-2xl"
+      />
+    </div>
+    <div
+      class="px-2 space-y-4"
+    >
+      <div
+        class="animate-pulse rounded-md bg-white/10 h-3 w-32"
+      />
+      <div
+        class="space-y-4"
+      >
+        <div
+          class="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-4"
+        >
+          <div
+            class="flex justify-between"
+          >
+            <div
+              class="space-y-2"
+            >
+              <div
+                class="animate-pulse rounded-md bg-white/10 h-4 w-48"
+              />
+              <div
+                class="animate-pulse rounded-md bg-white/10 h-3 w-64"
+              />
+            </div>
+            <div
+              class="animate-pulse rounded-md bg-white/10 h-4 w-16"
+            />
+          </div>
+          <div
+            class="space-y-2"
+          >
+            <div
+              class="animate-pulse bg-white/10 h-2 w-full rounded-full"
+            />
+            <div
+              class="flex justify-between"
+            >
+              <div
+                class="animate-pulse rounded-md bg-white/10 h-3 w-24"
+              />
+              <div
+                class="animate-pulse rounded-md bg-white/10 h-3 w-8"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div
+      class="px-2"
+    >
+      <div
+        class="animate-pulse bg-white/10 h-10 w-full rounded-xl"
+      />
+    </div>
+  </div>
+</div>
+`;
+
+exports[`Component Snapshots > ProfileTabs matches snapshot 1`] = `
+<div>
+  <div
+    class="space-y-6"
+  >
+    <div
+      class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-white/5 pb-1"
+    >
+      <div
+        class="flex gap-8"
+      >
+        <button
+          class="flex items-center gap-2 border-b-2 py-4 text-sm font-semibold transition-all border-mint text-mint"
+        >
+          <span>
+            HistoryIcon
+          </span>
+          Support History
+        </button>
+        <button
+          class="flex items-center gap-2 border-b-2 py-4 text-sm font-semibold transition-all border-transparent text-steel hover:text-white"
+        >
+          <span>
+            AwardIcon
+          </span>
+          Badges
+        </button>
+      </div>
+      <a
+        href="/dashboard/testuser"
+      >
+        <span>
+          DashboardIcon
+        </span>
+        View Dashboard
+      </a>
+    </div>
+    <div
+      animate="[object Object]"
+      class="min-h-[300px]"
+      exit="[object Object]"
+      initial="[object Object]"
+    >
+      <div
+        class="flex h-40 items-center justify-center"
+      >
+        <div
+          class="h-8 w-8 animate-spin rounded-full border-2 border-mint border-t-transparent"
+        />
+      </div>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`Component Snapshots > Skeleton matches snapshot 1`] = `
+<div>
+  <div
+    class="animate-pulse rounded-md bg-white/10 h-4 w-full"
+  />
+</div>
+`;
+
+exports[`Component Snapshots > Toast matches snapshot (error) 1`] = `
+<div>
+  <div
+    class="fixed bottom-4 right-4 px-4 py-3 rounded shadow-lg text-white
+      bg-red-600"
+  >
+    <span>
+      Error!
+    </span>
+    <button
+      class="ml-4 font-bold"
+    >
+      ×
+    </button>
+  </div>
+</div>
+`;
+
+exports[`Component Snapshots > Toast matches snapshot (success) 1`] = `
+<div>
+  <div
+    class="fixed bottom-4 right-4 px-4 py-3 rounded shadow-lg text-white
+      bg-green-600"
+  >
+    <span>
+      Success!
+    </span>
+    <button
+      class="ml-4 font-bold"
+    >
+      ×
+    </button>
+  </div>
+</div>
+`;

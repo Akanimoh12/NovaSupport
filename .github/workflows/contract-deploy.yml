@@ -1,0 +1,263 @@
+name: Contract Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "contract/**"
+      - ".github/workflows/contract-deploy.yml"
+  workflow_dispatch:
+    inputs:
+      network:
+        description: "Target network (testnet or mainnet)"
+        required: true
+        default: "testnet"
+        type: choice
+        options:
+          - testnet
+          - mainnet
+
+concurrency:
+  group: contract-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Run contract tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        working-directory: contract
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust with WASM target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contract
+
+      - name: Run contract tests
+        run: cargo test
+
+      - name: Build contract WASM
+        run: cargo build --target wasm32-unknown-unknown --release
+
+      - name: Upload WASM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: contract-wasm
+          path: contract/target/wasm32-unknown-unknown/release/support_page.wasm
+          retention-days: 1
+
+  deploy:
+    name: Deploy to testnet
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: testnet
+
+    env:
+      NETWORK: ${{ github.event.inputs.network || 'testnet' }}
+      STELLAR_NETWORK_PASSPHRASE: "Test SDF Network ; September 2015"
+      SOROBAN_RPC_URL: "https://soroban-testnet.stellar.org"
+      HORIZON_URL: "https://horizon-testnet.stellar.org"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download WASM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: contract-wasm
+          path: wasm
+
+      - name: Install Stellar CLI
+        run: |
+          curl -sSL https://github.com/stellar/stellar-cli/releases/download/v22.8.1/stellar-cli-22.8.1-x86_64-unknown-linux-gnu.tar.gz \
+            | tar -xz -C /usr/local/bin
+          stellar --version
+
+      - name: Configure Stellar CLI network
+        run: |
+          stellar network add \
+            --rpc-url "$SOROBAN_RPC_URL" \
+            --network-passphrase "$STELLAR_NETWORK_PASSPHRASE" \
+            testnet || true
+
+      - name: Import deployer identity
+        run: |
+          echo "${{ secrets.STELLAR_DEPLOYER_SECRET_KEY }}" | \
+            stellar keys add deployer --secret-key
+
+      - name: Fund deployer account (testnet only)
+        if: env.NETWORK == 'testnet'
+        run: |
+          stellar keys fund deployer --network testnet || true
+
+      - name: Deploy contract
+        id: deploy
+        run: |
+          CONTRACT_ID=$(stellar contract deploy \
+            --wasm wasm/support_page.wasm \
+            --source deployer \
+            --network testnet \
+            --ignore-checks 2>&1 | tail -1)
+
+          echo "contract_id=$CONTRACT_ID" >> "$GITHUB_OUTPUT"
+          echo "Deployed contract ID: $CONTRACT_ID"
+
+      - name: Initialize contract
+        run: |
+          stellar contract invoke \
+            --id "${{ steps.deploy.outputs.contract_id }}" \
+            --source deployer \
+            --network testnet \
+            -- initialize \
+            --admin "${{ secrets.STELLAR_ADMIN_ADDRESS }}"
+
+      - name: Verify deployment
+        id: verify
+        run: |
+          COUNT=$(stellar contract invoke \
+            --id "${{ steps.deploy.outputs.contract_id }}" \
+            --source deployer \
+            --network testnet \
+            -- support_count 2>&1 | tail -1)
+
+          echo "support_count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "Contract verified — support_count: $COUNT"
+
+      - name: Store contract ID in GitHub Actions summary
+        run: |
+          echo "## Contract Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Network | ${{ env.NETWORK }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Contract ID | \`${{ steps.deploy.outputs.contract_id }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Support Count | ${{ steps.verify.outputs.support_count }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Commit | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Deployed by | ${{ github.actor }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Explorer | [View on Stellar Expert](https://stellar.expert/explorer/testnet/contract/${{ steps.deploy.outputs.contract_id }}) |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Update CONTRACT_ID secret via GitHub API
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_UPDATE_SECRETS }}
+        run: |
+          # Fetch the repo public key for secret encryption
+          PUB_KEY_RESP=$(curl -sS \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/secrets/public-key")
+
+          KEY_ID=$(echo "$PUB_KEY_RESP" | grep '"key_id"' | sed 's/.*: "\(.*\)".*/\1/')
+          PUB_KEY=$(echo "$PUB_KEY_RESP" | grep '"key"' | sed 's/.*: "\(.*\)".*/\1/')
+
+          # Use Python (available on ubuntu-latest) to encrypt with libsodium
+          ENCRYPTED=$(python3 - <<EOF
+          import base64, sys
+          from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
+          from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+          # Use PyNaCl for sealed box encryption (matches GitHub's requirement)
+          import subprocess, json
+          subprocess.check_call(["pip", "install", "PyNaCl", "-q"])
+          import nacl.encoding, nacl.public
+
+          pub_key_bytes = base64.b64decode("$PUB_KEY")
+          pub_key = nacl.public.PublicKey(pub_key_bytes)
+          sealed = nacl.public.SealedBox(pub_key)
+          encrypted = sealed.encrypt(b"${{ steps.deploy.outputs.contract_id }}")
+          print(base64.b64encode(encrypted).decode())
+          EOF
+          )
+
+          # Update the secret
+          curl -sS -X PUT \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/secrets/NEXT_PUBLIC_CONTRACT_ID" \
+            -d "{\"encrypted_value\":\"$ENCRYPTED\",\"key_id\":\"$KEY_ID\"}"
+
+          echo "CONTRACT_ID secret updated successfully"
+
+  notify-success:
+    name: Notify deployment success
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: success()
+
+    steps:
+      - name: Post success summary
+        run: |
+          echo "## Deployment Succeeded" >> "$GITHUB_STEP_SUMMARY"
+          echo "Contract deployed and verified on **${{ needs.deploy.outputs.network || 'testnet' }}**." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Send Slack notification (success)
+        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {
+              "text": "✅ *NovaSupport contract deployed successfully*",
+              "attachments": [
+                {
+                  "color": "good",
+                  "fields": [
+                    { "title": "Network", "value": "${{ github.event.inputs.network || 'testnet' }}", "short": true },
+                    { "title": "Commit", "value": "${{ github.sha }}", "short": true },
+                    { "title": "Triggered by", "value": "${{ github.actor }}", "short": true },
+                    { "title": "Workflow", "value": "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>", "short": true }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+  notify-failure:
+    name: Notify deployment failure
+    needs: [test, deploy]
+    runs-on: ubuntu-latest
+    if: failure()
+
+    steps:
+      - name: Post failure summary
+        run: |
+          echo "## Deployment Failed" >> "$GITHUB_STEP_SUMMARY"
+          echo "Contract deployment to testnet failed. Check the workflow logs for details." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Send Slack notification (failure)
+        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {
+              "text": "❌ *NovaSupport contract deployment FAILED*",
+              "attachments": [
+                {
+                  "color": "danger",
+                  "fields": [
+                    { "title": "Network", "value": "${{ github.event.inputs.network || 'testnet' }}", "short": true },
+                    { "title": "Commit", "value": "${{ github.sha }}", "short": true },
+                    { "title": "Triggered by", "value": "${{ github.actor }}", "short": true },
+                    { "title": "Workflow", "value": "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>", "short": true }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

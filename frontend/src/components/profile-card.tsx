@@ -1,6 +1,10 @@
 "use client";
-import { useState } from "react";
+import { useState, useCallback, KeyboardEvent } from "react";
 import { isValidStellarAddress } from "@/lib/stellar";
+import { useToast } from "@/lib/use-toast";
+import { SITE_URL } from "@/lib/config";
+
+import { ProfileCardSkeleton } from "./skeleton";
 
 type Asset = {
   code: string;
@@ -25,6 +29,7 @@ type ProfileCardProps = {
   twitterHandle?: string;
   githubHandle?: string;
   stats?: ProfileStats;
+  isLoading?: boolean;
 };
 
 export function ProfileCard({
@@ -39,48 +44,156 @@ export function ProfileCard({
   twitterHandle,
   githubHandle,
   stats,
-}: ProfileCardProps) {
+  isVerified,
+  isLoading,
+}: ProfileCardProps & { isVerified?: boolean }) {
   const [copied, setCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resendSent, setResendSent] = useState(false);
+  const { showToast } = useToast();
+
   const isValid = isValidStellarAddress(walletAddress);
   const hasSocialLinks = email || websiteUrl || twitterHandle || githubHandle;
 
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(walletAddress);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const currentWallet = typeof window !== 'undefined' ? localStorage.getItem('walletAddress') : null;
+  const isOwner = currentWallet === walletAddress;
+
+  const handleResend = async () => {
+    setResending(true);
+    try {
+      const token = localStorage.getItem("authToken");
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/profiles/${username}/resend-verification-email`, {
+        method: "POST",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setResendSent(true);
+        showToast("Verification email sent! Check your inbox.", "success");
+      } else {
+        showToast(data.error || "Failed to resend email", "error");
+      }
+    } catch (err) {
+      showToast("Connection error", "error");
+    } finally {
+      setResending(false);
+    }
+  };
+
+  const handleCopy = useCallback(async () => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(walletAddress);
+      } else {
+        const textArea = document.createElement("textarea");
+        textArea.value = walletAddress;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-9999px";
+        textArea.style.top = "0";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        const successful = document.execCommand("copy");
+        document.body.removeChild(textArea);
+        if (!successful) throw new Error("Fallback copy failed");
+      }
+      showToast("Wallet address copied!", "success");
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error("Copy failed", err);
+      showToast("Failed to copy address", "error");
+    }
+  }, [walletAddress, showToast]);
+
+  const handleKeyDown = (e: KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "c") {
+      e.preventDefault();
+      handleCopy();
+    }
   };
 
   const profileUrl = typeof window !== 'undefined' 
     ? `${window.location.origin}/profile/${username}`
-    : `https://novasupport.xyz/profile/${username}`;
+    : `${SITE_URL}/profile/${username}`;
 
-  const handleCopyLink = async () => {
-    await navigator.clipboard.writeText(profileUrl);
-    setLinkCopied(true);
-    setTimeout(() => setLinkCopied(false), 2000);
-  };
+  const handleCopyLink = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(profileUrl);
+      setLinkCopied(true);
+      showToast("Profile link copied!", "success");
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch (err) {
+      showToast("Failed to copy profile link", "error");
+    }
+  }, [profileUrl, showToast]);
 
   const tweetText = encodeURIComponent(`Support me on NovaSupport: ${profileUrl}`);
   const tweetUrl = `https://twitter.com/intent/tweet?text=${tweetText}`;
 
   const expertUrl = `https://stellar.expert/explorer/testnet/account/${walletAddress}`;
 
+  if (isLoading) return <ProfileCardSkeleton />;
+
   return (
-    <article className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-5 sm:p-7 shadow-xl shadow-black/15">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex gap-4">
-          {avatarUrl ? (
-            <img src={avatarUrl} alt={displayName} className="w-16 h-16 rounded-full object-cover" />
-          ) : (
-            <div className="w-16 h-16 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xl font-bold">
-              {displayName.slice(0, 2).toUpperCase()}
+    <div className="space-y-4">
+      {isOwner && !isVerified && (
+        <div className="rounded-2xl border border-gold/30 bg-gold/5 p-4 flex items-center justify-between gap-4 animate-in fade-in slide-in-from-top-4 duration-500">
+          {resendSent ? (
+            <div className="flex items-center gap-3 w-full">
+              <span className="text-xl">📬</span>
+              <div>
+                <p className="text-sm font-semibold text-white">Check your email</p>
+                <p className="text-xs text-sky/70">We sent a new verification link to your inbox. It expires in 24 hours.</p>
+              </div>
             </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-3">
+                <span className="text-xl">✉️</span>
+                <div>
+                  <p className="text-sm font-semibold text-white">Verify your email address</p>
+                  <p className="text-xs text-sky/70">Check your inbox to secure your profile and receive notifications.</p>
+                </div>
+              </div>
+              <button
+                onClick={handleResend}
+                disabled={resending}
+                className="text-xs font-bold text-gold hover:text-white transition-colors disabled:opacity-50"
+              >
+                {resending ? 'Sending...' : 'Resend link'}
+              </button>
+            </>
           )}
-          <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-mint">@{username}</p>
-            <h1 className="mt-3 text-2xl sm:text-3xl font-semibold text-white">{displayName}</h1>
-            <p className="mt-4 max-w-2xl text-sm sm:text-base leading-relaxed sm:leading-7 text-sky/80">{bio}</p>
+        </div>
+      )}
+
+      <article className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-5 sm:p-7 shadow-xl shadow-black/15">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex gap-4">
+            {avatarUrl ? (
+              <img src={avatarUrl} alt={displayName} className="w-16 h-16 rounded-full object-cover" />
+            ) : (
+              <div className="w-16 h-16 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xl font-bold">
+                {displayName.slice(0, 2).toUpperCase()}
+              </div>
+            )}
+            <div>
+              <div className="flex items-center gap-2">
+                <p className="text-xs uppercase tracking-[0.3em] text-mint">@{username}</p>
+                {isVerified && (
+                  <span title="Verified Creator" className="flex items-center justify-center w-4 h-4 rounded-full bg-mint text-ink text-[10px] font-bold">
+                    ✓
+                  </span>
+                )}
+              </div>
+              <h1 className="mt-3 text-2xl sm:text-3xl font-semibold text-white flex items-center gap-3">
+                {displayName}
+              </h1>
+              <p className="mt-4 max-w-2xl text-sm sm:text-base leading-relaxed sm:leading-7 text-sky/80">{bio}</p>
 
             {stats && (
               <div className="mt-6 flex flex-wrap gap-8 items-center border-t border-white/5 pt-6">
@@ -100,7 +213,15 @@ export function ProfileCard({
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-wider text-sky/60">Supporters</p>
-                  <p className="mt-1 text-sm font-semibold text-white">{stats.uniqueSupporters}</p>
+                  {stats.uniqueSupporters === 0 ? (
+                    <p className="mt-1 text-sm font-semibold text-gold">Be the first to support!</p>
+                  ) : (
+                    <p className="mt-1 text-sm font-semibold text-white">
+                      {stats.uniqueSupporters === 1
+                        ? "1 supporter"
+                        : `${stats.uniqueSupporters} supporters`}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-wider text-sky/60">Transactions</p>
@@ -173,15 +294,30 @@ export function ProfileCard({
               href={expertUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-indigo-500 hover:underline font-mono break-all flex-1"
+              onKeyDown={handleKeyDown}
+              aria-label={`Stellar wallet address: ${walletAddress}. Press Ctrl+C to copy.`}
+              className="text-xs text-indigo-500 hover:underline font-mono break-all flex-1 focus:outline-none focus:ring-1 focus:ring-mint/50 rounded"
             >
               {walletAddress}
             </a>
             <button 
               onClick={handleCopy} 
-              className="ml-2 text-xs text-gray-400 hover:text-gray-600 transition-colors"
+              aria-label="Copy wallet address to clipboard"
+              title="Copy to clipboard"
+              className="ml-2 p-1 text-gray-400 hover:text-white transition-colors focus:outline-none focus:ring-1 focus:ring-mint/50 rounded"
             >
-              {copied ? 'Copied!' : 'Copy'}
+              {copied ? (
+                <span className="text-mint flex items-center gap-1">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  Copied
+                </span>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 12-2h2a2 2 0 12 2m0 0h2a2 2 0 12 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                </svg>
+              )}
             </button>
           </div>
           <p className={`mt-3 ${isValid ? "text-mint" : "text-gold"}`}>
@@ -205,5 +341,6 @@ export function ProfileCard({
         </div>
       </div>
     </article>
+    </div>
   );
 }

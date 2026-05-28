@@ -1,0 +1,59 @@
+name: Frontend CI
+
+on:
+  pull_request_target:
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend.yml"
+      - "lighthouserc.js"
+  push:
+    branches:
+      - main
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend.yml"
+      - "lighthouserc.js"
+
+jobs:
+  frontend:
+    name: Frontend checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
+  lighthouse:
+    name: Lighthouse CI
+    runs-on: ubuntu-latest
+    # Only run on PRs to avoid burning CI minutes on every push to main
+    if: github.event_name == 'pull_request_target'
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - name: Run Lighthouse CI
+        run: npx @lhci/cli@0.14.x autorun --config=../lighthouserc.js
+        env:
+          LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}

@@ -15,6 +15,7 @@ model User {
   updatedAt           DateTime             @updatedAt
   profiles            Profile[]
   supportTransactions SupportTransaction[] @relation("SupporterTransactions")
+  recurringSupports   RecurringSupport[]   @relation("RecurringSupporters")
 }
 
 model Profile {
@@ -23,9 +24,12 @@ model Profile {
   displayName         String
   bio                 String
   avatarUrl           String?
-  email               String?              @unique
-  notifyOnSupport     Boolean              @default(true)
-  websiteUrl          String?
+  email                     String?              @unique
+  emailVerified             Boolean              @default(false)
+  emailVerificationToken    String?              @unique
+  emailVerificationExpiry   DateTime?
+  notifyOnSupport           Boolean              @default(true)
+  websiteUrl                String?
   twitterHandle       String?
   githubHandle        String?
   walletAddress       String
@@ -37,6 +41,29 @@ model Profile {
   acceptedAssets      AcceptedAsset[]
   supportTransactions SupportTransaction[]
   badges              ProfileBadge[]
+  recurringSupports   RecurringSupport[]
+  milestones          Milestone[]
+  webhooks            Webhook[]
+  notificationPreferences NotificationPreferences?
+
+  @@index([createdAt(sort: Desc)])
+  @@index([ownerId])
+  // Note: pg_trgm GIN indexes for fuzzy search are created at runtime
+  // via `CREATE EXTENSION IF NOT EXISTS pg_trgm` in the search endpoint.
+  // For production, add a migration:
+  //   CREATE INDEX idx_profile_username_trgm ON "Profile" USING GIN ("username" gin_trgm_ops);
+  //   CREATE INDEX idx_profile_displayname_trgm ON "Profile" USING GIN ("displayName" gin_trgm_ops);
+}
+
+model NotificationPreferences {
+  id                 String   @id @default(cuid())
+  profileId          String   @unique
+  notifyOnSupport    Boolean  @default(true)
+  notifyOnMilestone  Boolean  @default(true)
+  weeklyDigest       Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  profile            Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
 }
 
 model AcceptedAsset {
@@ -58,6 +85,7 @@ model SupportTransaction {
   assetIssuer      String?
   status           String
   message          String?
+  memo             String?
   stellarNetwork   String
   supporterAddress String?
   recipientAddress String
@@ -70,6 +98,26 @@ model SupportTransaction {
 
   @@index([profileId])
   @@index([supporterId])
+  @@index([profileId, status, createdAt(sort: Desc)])
+  @@index([supporterAddress, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  @@index([status])
+}
+
+model Milestone {
+  id            String    @id @default(cuid())
+  title         String
+  description   String?
+  targetAmount  Decimal   @db.Decimal(18, 7)
+  currentAmount Decimal   @db.Decimal(18, 7) @default(0)
+  assetCode     String    @default("XLM")
+  status        String    @default("active")
+  profileId     String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  profile       Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
 }
 
 model Badge {
@@ -92,4 +140,71 @@ model ProfileBadge {
 
   @@unique([profileId, badgeId])
   @@index([profileId])
+model Webhook {
+  id        String   @id @default(cuid())
+  url       String
+  secret    String
+  active    Boolean  @default(true)
+  profileId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  deliveries WebhookDelivery[]
+
+  @@index([profileId])
+}
+
+model WebhookDelivery {
+  id           String   @id @default(cuid())
+  webhookId    String
+  eventType    String
+  payload      Json
+  status       String   @default("pending") // "pending", "success", "failed"
+  attemptCount Int      @default(0)
+  nextRetryAt  DateTime @default(now())
+  lastError    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  webhook      Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId])
+  @@index([status, nextRetryAt])
+}
+
+model RecurringSupport {
+  id          String   @id @default(cuid())
+  supporterId String
+  profileId   String
+  amount      Decimal  @db.Decimal(18, 7)
+  assetCode   String   @default("XLM")
+  frequency   String
+  nextRunAt   DateTime
+  status      String   @default("active")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  supporter   User     @relation("RecurringSupporters", fields: [supporterId], references: [id], onDelete: Cascade)
+  profile     Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([supporterId])
+  @@index([profileId])
+  @@index([nextRunAt])
+  @@index([nextRunAt, status])
+}
+
+// #281: cursor record for the contract event indexer.
+// One row per (network, contractId) pair. The indexer reads the cursor on
+// start, fetches events strictly after `lastPagingToken`, and updates the
+// row inside the same transaction that persists the new SupportTransaction
+// rows so reprocessing never produces duplicates.
+model IndexerCursor {
+  id              String   @id @default(cuid())
+  network         String
+  contractId      String
+  lastPagingToken String
+  lastLedger      Int      @default(0)
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+
+  @@unique([network, contractId])
+  @@map("indexer_cursors")
 }

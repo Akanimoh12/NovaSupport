@@ -1,7 +1,7 @@
 name: Contract CI
 
 on:
-  pull_request_target:
+  pull_request:
     paths:
       - "contract/**"
       - ".github/workflows/contract.yml"

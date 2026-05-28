@@ -19,7 +19,44 @@ target/
 Cargo.lock
 backend/prisma/dev.db
 backend/prisma/dev.db-journal
+
+# AI Artifacts - Generated files from AI assistants
 is.md
 issue.md
 pr.md
 checks.md
+fix.md
+checklist.md
+.agents/
+.claude/
+skills-lock.json
+artifact_*.md
+ai_*.md
+claude_*.md
+kiro_*.md
+*.artifact
+*.ai
+*.kiro
+*.claude
+temp_*.md
+draft_*.md
+generated_*.md
+analysis_*.md
+summary_*.md
+notes_*.md
+
+# Ignore all .md files except important documentation
+*.md
+!README.md
+!ARCHITECTURE.md
+!CONTRIBUTING.md
+!LICENSE.md
+!CHANGELOG.md
+# Allow docs folder markdown files
+!docs/**/*.md
+# Allow contract documentation
+!contract/**/*.md
+
+# GitHub Issue Automation Scripts
+scripts/
+ISSUE_AUTOMATION_SETUP.md

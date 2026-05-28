@@ -57,9 +57,7 @@ changes to the contract.
 - **No admin key.** There is no admin or owner address stored in the contract. No upgrade
   authority, pause function, or privileged operation exists.
 
-- **Immutable once deployed.** The contract has no `upgrade` entry point. Once deployed to
-  a contract ID, the WASM cannot be swapped out. Deploy a new contract instance to ship
-  changes.
+- **Immutable once deployed.** The contract has no `upgrade` entry point or admin key. Once deployed to a contract ID, the WASM cannot be altered. This ensures that the logic seen at the time of deployment is what will always execute for that ID. Any "upgrade" requires deploying a new contract instance and updating the platform to use the new ID.
 
 - **Events are trusted as-is.** The backend and frontend are responsible for validating
   event data. The contract emits whatever values it receives; it does not cross-check

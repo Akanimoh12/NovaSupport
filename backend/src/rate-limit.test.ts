@@ -308,6 +308,56 @@ async function testProperty5() {
   );
 }
 
+// ── Property 6: Profile creation limiter enforces 3-per-hour threshold ────
+// Feature: profile-creation-rate-limiting, Property 6: profile creation limiter
+//
+// POST /profiles must return 429 on the 4th request from the same IP within
+// an hour. Uses an invalid body so Zod rejects it (400) before Prisma is
+// called — the profileCreationLimiter runs before the handler and still
+// counts the request.
+//
+// Validates: Issue #316 acceptance criteria
+
+async function testProperty6() {
+  // fast-check part: first request to POST /profiles → non-429
+  await fc.assert(
+    fc.asyncProperty(
+      fc.constant(null),
+      async () => {
+        const srv = await startFreshServer();
+        try {
+          const res = await sendRequest(srv.baseUrl, "POST", "/profiles", { username: "x" });
+          assert.notEqual(res.status, 429, "First POST /profiles should not be 429");
+        } finally {
+          await srv.close();
+        }
+      }
+    ),
+    { numRuns: 10 }
+  );
+
+  // Boundary test: 4th POST /profiles must be 429
+  {
+    const srv = await startFreshServer();
+    try {
+      for (let i = 0; i < 3; i++) {
+        const res = await sendRequest(srv.baseUrl, "POST", "/profiles", { username: "x" });
+        assert.notEqual(res.status, 429, `Profile creation request ${i + 1} should not be 429`);
+      }
+      const over = await sendRequest(srv.baseUrl, "POST", "/profiles", { username: "x" });
+      assert.equal(over.status, 429, "4th POST /profiles should be 429");
+
+      // Verify the error body has the correct structure
+      const body = await over.json();
+      assert.equal(typeof body.error, "string", "429 body must have an error string");
+      assert.ok(body.error.length > 0, "error field must be non-empty");
+      assert.equal(body.code, "PROFILE_CREATION_RATE_LIMIT_EXCEEDED", "429 body must have correct code");
+    } finally {
+      await srv.close();
+    }
+  }
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -330,6 +380,10 @@ async function main() {
   await runTest(
     "Property 5: write requests count against the global limit (fast-check × 100)",
     testProperty5
+  );
+  await runTest(
+    "Property 6: profile creation limiter enforces 3-per-hour threshold (fast-check × 10 + boundary)",
+    testProperty6
   );
 }
 

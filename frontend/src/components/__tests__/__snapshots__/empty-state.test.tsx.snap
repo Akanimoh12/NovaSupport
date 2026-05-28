@@ -1,0 +1,166 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`EmptyState > renders default variant 1`] = `
+<div>
+  <div
+    class="flex flex-col items-center justify-center px-4 py-12"
+  >
+    <svg
+      class="mx-auto mb-4 h-16 w-16 text-gray-300 dark:text-gray-600"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+    >
+      <path
+        d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="1.5"
+      />
+    </svg>
+    <h3
+      class="mt-4 text-center text-lg font-semibold text-gray-900 dark:text-white"
+    >
+      No data
+    </h3>
+    <p
+      class="mt-2 max-w-sm text-center text-sm text-gray-500 dark:text-gray-400"
+    >
+      There is no data to display
+    </p>
+  </div>
+</div>
+`;
+
+exports[`EmptyState > renders explore variant 1`] = `
+<div>
+  <div
+    class="flex flex-col items-center justify-center px-4 py-12"
+  >
+    <svg
+      class="mx-auto mb-4 h-16 w-16 text-gray-300 dark:text-gray-600"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+    >
+      <path
+        d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="1.5"
+      />
+    </svg>
+    <h3
+      class="mt-4 text-center text-lg font-semibold text-gray-900 dark:text-white"
+    >
+      No creators found
+    </h3>
+    <p
+      class="mt-2 max-w-sm text-center text-sm text-gray-500 dark:text-gray-400"
+    >
+      Try adjusting your search or check back later.
+    </p>
+  </div>
+</div>
+`;
+
+exports[`EmptyState > renders supporters variant 1`] = `
+<div>
+  <div
+    class="flex flex-col items-center justify-center px-4 py-12"
+  >
+    <svg
+      class="mx-auto mb-4 h-16 w-16 text-gray-300 dark:text-gray-600"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+    >
+      <path
+        d="M17 20h5v-2a3 3 0 00-5.856-1.487M15 10a3 3 0 11-6 0 3 3 0 016 0zM6 20h12a6 6 0 00-6-6 6 6 0 00-6 6z"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="1.5"
+      />
+    </svg>
+    <h3
+      class="mt-4 text-center text-lg font-semibold text-gray-900 dark:text-white"
+    >
+      Be the first to support!
+    </h3>
+    <p
+      class="mt-2 max-w-sm text-center text-sm text-gray-500 dark:text-gray-400"
+    >
+      This profile hasn't received support yet.
+    </p>
+  </div>
+</div>
+`;
+
+exports[`EmptyState > renders transactions variant 1`] = `
+<div>
+  <div
+    class="flex flex-col items-center justify-center px-4 py-12"
+  >
+    <svg
+      class="mx-auto mb-4 h-16 w-16 text-gray-300 dark:text-gray-600"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+    >
+      <path
+        d="M13 16h-1v-4h-1m1-4h.01M21 12A9 9 0 1111 3a9 9 0 0110 9z"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="1.5"
+      />
+    </svg>
+    <h3
+      class="mt-4 text-center text-lg font-semibold text-gray-900 dark:text-white"
+    >
+      No transactions yet
+    </h3>
+    <p
+      class="mt-2 max-w-sm text-center text-sm text-gray-500 dark:text-gray-400"
+    >
+      Transactions will appear here once supporters send funds.
+    </p>
+  </div>
+</div>
+`;
+
+exports[`EmptyState > renders with action button 1`] = `
+<div>
+  <div
+    class="flex flex-col items-center justify-center px-4 py-12"
+  >
+    <svg
+      class="mx-auto mb-4 h-16 w-16 text-gray-300 dark:text-gray-600"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+    >
+      <path
+        d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="1.5"
+      />
+    </svg>
+    <h3
+      class="mt-4 text-center text-lg font-semibold text-gray-900 dark:text-white"
+    >
+      No results
+    </h3>
+    <p
+      class="mt-2 max-w-sm text-center text-sm text-gray-500 dark:text-gray-400"
+    >
+      Try adjusting your search
+    </p>
+    <button
+      class="mt-6 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 px-4 py-2 text-white transition-shadow hover:shadow-lg"
+    >
+      Clear Search
+    </button>
+  </div>
+</div>
+`;

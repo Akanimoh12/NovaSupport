@@ -1,7 +1,7 @@
 name: Backend CI
 
 on:
-  pull_request_target:
+  pull_request:
     paths:
       - "backend/**"
       - ".github/workflows/backend.yml"
@@ -63,6 +63,16 @@ jobs:
 
       - name: Apply database migrations
         run: npm run db:migrate:deploy
+
+      - name: Validate database migrations
+        run: |
+          npx prisma migrate diff \
+            --from-schema-datamodel prisma/schema.prisma \
+            --to-migrations prisma/migrations \
+            --shadow-database-url "$DATABASE_URL" \
+            --exit-code
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
 
       - name: Run backend tests
         run: npm run test

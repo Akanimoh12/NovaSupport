@@ -1,9 +1,17 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { Keypair, StrKey } from "@stellar/stellar-sdk";
+import { logger } from "./logger.js";
 
-const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-in-production";
+const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRY = "1h";
+
+if (!JWT_SECRET) {
+  throw new Error("FATAL: JWT_SECRET environment variable is required but not set. Application cannot start.");
+}
+
+// Type assertion after validation - we know JWT_SECRET is a string now
+const JWT_SECRET_VALIDATED: string = JWT_SECRET;
 
 export type AuthContext = {
   walletAddress: string;
@@ -40,8 +48,8 @@ export function verifySignature(
     const messageBuffer = Buffer.from(challenge, 'utf8');
     const sigBuffer = Buffer.from(signature, 'base64');
     return keypair.verify(messageBuffer, sigBuffer);
-  } catch {
-    console.error("Signature verification error");
+  } catch (error) {
+    logger.error({ error }, "Signature verification error");
     return false;
   }
 }
@@ -50,7 +58,7 @@ export function verifySignature(
 export function signJWT(walletAddress: string, userId?: string): string {
   return jwt.sign(
     { walletAddress, userId },
-    JWT_SECRET,
+    JWT_SECRET_VALIDATED,
     { expiresIn: JWT_EXPIRY }
   );
 }
@@ -58,7 +66,7 @@ export function signJWT(walletAddress: string, userId?: string): string {
 // Verify and decode JWT
 export function verifyJWT(token: string): AuthContext | null {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as AuthContext;
+    const decoded = jwt.verify(token, JWT_SECRET_VALIDATED) as AuthContext;
     return decoded;
   } catch {
     return null;

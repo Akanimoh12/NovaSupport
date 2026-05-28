@@ -1,6 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ProfileCard } from '@/components/profile-card';
+
+const showToast = vi.fn();
 
 // Mock @/lib/config
 vi.mock('@/lib/config', () => ({
@@ -23,7 +25,19 @@ vi.mock('@/lib/stellar', () => ({
   },
 }));
 
+vi.mock('@/lib/use-toast', () => ({
+  useToast: () => ({ showToast }),
+}));
+
 describe('ProfileCard', () => {
+  beforeEach(() => {
+    showToast.mockReset();
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      configurable: true,
+    });
+  });
+
   const mockProfile = {
     username: 'stellar-dev',
     displayName: 'Stellar Developer',
@@ -40,16 +54,18 @@ describe('ProfileCard', () => {
   };
 
   it('renders display name and username', () => {
-    render(<ProfileCard {...mockProfile} />);
+    const { container } = render(<ProfileCard {...mockProfile} />);
     
     expect(screen.getByText('@stellar-dev')).toBeInTheDocument();
     expect(screen.getByText('Stellar Developer')).toBeInTheDocument();
+    expect(container).toMatchSnapshot();
   });
 
   it('renders bio', () => {
-    render(<ProfileCard {...mockProfile} />);
+    const { container } = render(<ProfileCard {...mockProfile} />);
     
     expect(screen.getByText('Building on Stellar blockchain')).toBeInTheDocument();
+    expect(container).toMatchSnapshot();
   });
 
   it('renders wallet address', () => {
@@ -73,5 +89,39 @@ describe('ProfileCard', () => {
     expect(screen.getByText('Accepted assets')).toBeInTheDocument();
     expect(screen.getByText('XLM')).toBeInTheDocument();
     expect(screen.getByText('USDC')).toBeInTheDocument();
+  });
+
+  it('renders skeleton when isLoading is true', () => {
+    const { container } = render(<ProfileCard {...mockProfile} isLoading={true} />);
+    
+    // The skeleton article is rendered
+    expect(container.querySelector('article')).toBeInTheDocument();
+    // The display name should NOT be rendered
+    expect(screen.queryByText('Stellar Developer')).not.toBeInTheDocument();
+    expect(container).toMatchSnapshot();
+  });
+
+  it('shows success toast after copying wallet address', async () => {
+    render(<ProfileCard {...mockProfile} />);
+    fireEvent.click(
+      screen.getByRole('button', { name: /copy wallet address to clipboard/i }),
+    );
+
+    await waitFor(() => {
+      expect(showToast).toHaveBeenCalledWith('Wallet address copied!', 'success');
+    });
+  });
+
+  it('supports Ctrl/Cmd+C while wallet address is focused', async () => {
+    render(<ProfileCard {...mockProfile} />);
+    const walletLink = screen.getByLabelText(
+      new RegExp(`Stellar wallet address: ${mockProfile.walletAddress}`, 'i'),
+    );
+    walletLink.focus();
+    fireEvent.keyDown(walletLink, { key: 'c', ctrlKey: true });
+
+    await waitFor(() => {
+      expect(showToast).toHaveBeenCalledWith('Wallet address copied!', 'success');
+    });
   });
 });

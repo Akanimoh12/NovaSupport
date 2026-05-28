@@ -239,11 +239,19 @@ function downloadCsv(rows: TransactionCsvRow[]): void {
   URL.revokeObjectURL(url);
 }
 
+type AssetBreakdownEntry = {
+  assetCode: string;
+  amount: number;
+  percentage: number;
+};
+
 export default function DashboardPage() {
   const { campaignId } = useParams<{ campaignId: string }>();
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [settings, setSettings] = useState<ProfileSettings | null>(null);
   const [chartData, setChartData] = useState<ChartPoint[]>([]);
+  const [assetBreakdown, setAssetBreakdown] = useState<AssetBreakdownEntry[]>([]);
+  const [assetTotal, setAssetTotal] = useState(0);
   const [selectedPeriod, setSelectedPeriod] = useState<ChartRange>("30D");
   const [chartLoading, setChartLoading] = useState(true);
   const [connectedWallet, setConnectedWallet] = useState("");
@@ -255,9 +263,10 @@ export default function DashboardPage() {
   useEffect(() => {
     async function fetchData() {
       try {
-        const [analyticsRes, profileRes] = await Promise.all([
+        const [analyticsRes, profileRes, assetsRes] = await Promise.all([
           fetch(`${API_BASE_URL}/analytics/${campaignId}`),
           fetch(`${API_BASE_URL}/profiles/${campaignId}`),
+          fetch(`${API_BASE_URL}/profiles/${campaignId}/analytics/assets`),
         ]);
         if (!analyticsRes.ok) throw new Error("Failed to fetch analytics");
         if (!profileRes.ok) throw new Error("Failed to fetch profile settings");
@@ -270,6 +279,12 @@ export default function DashboardPage() {
           email: toString(profileJson.email, "") || null,
           notifyOnSupport: toBool(profileJson.notifyOnSupport, true),
         });
+
+        if (assetsRes.ok) {
+          const assetsJson = (await assetsRes.json()) as { breakdown: AssetBreakdownEntry[]; total: number };
+          setAssetBreakdown(assetsJson.breakdown ?? []);
+          setAssetTotal(assetsJson.total ?? 0);
+        }
       } catch (err: any) {
         setError(err.message);
       } finally {
@@ -460,7 +475,7 @@ export default function DashboardPage() {
                     key={period}
                     type="button"
                     onClick={() => setSelectedPeriod(period)}
-                    className={`rounded-full px-4 py-2 text-xs font-semibold transition ${
+                    className={`min-h-[44px] rounded-full px-4 py-2 text-xs font-semibold transition ${
                       selectedPeriod === period
                         ? "bg-mint text-ink"
                         : "text-sky/70 hover:text-white"
@@ -536,8 +551,8 @@ export default function DashboardPage() {
             </div>
           </motion.div>
 
-          {/* Pie Chart */}
-          <motion.div 
+          {/* Asset Breakdown Chart */}
+          <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-sm shadow-black/40"
@@ -545,39 +560,62 @@ export default function DashboardPage() {
             <h3 className="mb-6 text-sm font-semibold uppercase tracking-widest text-steel">
               Asset Distribution
             </h3>
-            <div className="h-[350px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={data.assetBreakdown}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={5}
-                    dataKey="value"
-                  >
-                    {data.assetBreakdown.map((_entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: "#0A0A0B", 
-                      border: "1px solid rgba(255,255,255,0.1)",
-                      borderRadius: "12px"
-                    }}
-                  />
-                  <Legend verticalAlign="bottom" height={36}/>
-                </PieChart>
-              </ResponsiveContainer>
+            <div className="h-[280px] w-full">
+              {assetBreakdown.length === 0 ? (
+                <div className="flex h-full flex-col items-center justify-center rounded-3xl border border-dashed border-white/10 bg-white/[0.02] text-center">
+                  <p className="text-lg font-semibold text-white">No earnings data yet</p>
+                  <p className="mt-2 max-w-sm text-sm text-steel">
+                    Asset breakdown will appear once you receive support.
+                  </p>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={assetBreakdown}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={100}
+                      paddingAngle={5}
+                      dataKey="amount"
+                      nameKey="assetCode"
+                      label={(props) => {
+                        const entry = props as unknown as AssetBreakdownEntry;
+                        return `${entry.assetCode} ${entry.percentage}%`;
+                      }}
+                      labelLine={false}
+                    >
+                      {assetBreakdown.map((_entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: "#0A0A0B",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        borderRadius: "12px",
+                      }}
+                      formatter={(value, name) => [`${value} ${name}`, "Amount"]}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
             </div>
+            {assetBreakdown.length > 0 && (
+              <div className="mt-4 border-t border-white/10 pt-4 text-center">
+                <p className="text-[10px] uppercase tracking-widest text-steel">Total Earned</p>
+                <p className="mt-1 text-xl font-bold text-white tabular-nums">
+                  {assetTotal.toLocaleString(undefined, { maximumFractionDigits: 7 })}
+                </p>
+              </div>
+            )}
           </motion.div>
         </div>
 
         {/* Recent Transactions */}
         <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
-          <div className="mb-6 flex items-center justify-between gap-4">
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
             <h3 className="text-sm font-semibold uppercase tracking-widest text-steel font-mono">
               On-Chain Explorer Integration
             </h3>
@@ -586,7 +624,7 @@ export default function DashboardPage() {
                 type="button"
                 onClick={handleDownloadCsv}
                 disabled={csvLoading}
-                className="inline-flex items-center justify-center rounded-xl border border-mint/30 bg-mint/10 px-4 py-2 text-xs font-bold text-mint transition hover:bg-mint/20 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-mint/30 bg-mint/10 px-4 py-2 text-xs font-bold text-mint transition hover:bg-mint/20 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {csvLoading ? (
                   <span className="flex items-center gap-2">
@@ -599,8 +637,8 @@ export default function DashboardPage() {
               </button>
             )}
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-sky/70">
+          <div className="overflow-x-auto -mx-6 px-6">
+            <table className="w-full min-w-[480px] text-left text-sm text-sky/70">
               <thead className="border-b border-white/10 text-[10px] uppercase tracking-widest text-steel">
                 <tr>
                   <th className="pb-4 pr-4">Type</th>
@@ -620,7 +658,7 @@ export default function DashboardPage() {
                         {item.type}
                       </span>
                     </td>
-                    <td className="py-4 pr-4 font-mono text-xs">{item.user}</td>
+                    <td className="py-4 pr-4 font-mono text-xs max-w-[120px] truncate">{item.user}</td>
                     <td className="py-4 pr-4 text-white font-medium">{item.asset}</td>
                     <td className="py-4 pr-4 text-white font-medium">{item.amount}</td>
                     <td className="py-4 pr-4 text-right tabular-nums">{item.age}</td>
