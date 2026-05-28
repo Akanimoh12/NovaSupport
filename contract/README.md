@@ -466,6 +466,108 @@ echo "https://stellar.expert/explorer/testnet/contract/$NEW_CONTRACT_ID"
 
 Make the script executable: `chmod +x emergency-rollback.sh`
 
+## Gas Estimation
+
+Soroban contracts are metered by **CPU instructions** and **memory bytes**. Every `support()` call consumes resources that translate into a *resource fee* on top of the base transaction fee.
+
+### How Stellar fees work
+
+| Component | Description |
+|-----------|-------------|
+| **Base fee** | Fixed per-operation fee; default `BASE_FEE = 100` stroops |
+| **Resource fee** | Variable fee based on CPU instructions, memory, ledger I/O, and transaction size |
+| **Total fee** | `base_fee + resource_fee` (paid in XLM, 1 XLM = 10,000,000 stroops) |
+
+### Typical gas costs for `support()`
+
+The table below shows simulated resource consumption across representative scenarios. Actual values vary with network congestion and Soroban protocol version.
+
+| Scenario | Amount | Message length | CPU Instructions | Memory | Min Resource Fee |
+|----------|--------|---------------|-----------------|--------|-----------------|
+| Minimal | 1 XLM | 10 chars | ~2,500,000 | ~600 KB | ~50,000 stroops (~0.005 XLM) |
+| Typical | 5 XLM | 60 chars | ~3,000,000 | ~650 KB | ~60,000 stroops (~0.006 XLM) |
+| Long message | 10 XLM | 200 chars | ~3,500,000 | ~700 KB | ~75,000 stroops (~0.0075 XLM) |
+| Max message | 10 XLM | 280 chars | ~3,800,000 | ~720 KB | ~85,000 stroops (~0.0085 XLM) |
+
+> **Key takeaway:** A typical support transaction costs well under **0.01 XLM** in fees. The dominant cost driver is the SAC token transfer (`transfer()`), not the message length.
+
+### Factors that affect gas costs
+
+1. **Message length** — The `message` parameter is stored in contract arguments and validated on-chain. Longer messages increase instruction count and transaction size slightly.
+2. **Token transfer** — `token::Client::transfer()` is the most expensive single operation. It invokes the Stellar Asset Contract (SAC), which reads and writes ledger entries for both the supporter and the contract balances.
+3. **Storage TTL extension** — Every `support()` call extends TTL for `SupportCount`, `RecipientCount`, `RecipientTotal`, and `TotalByAsset` entries, adding four ledger write operations.
+4. **First-time recipient** — If the recipient has no prior transactions with this contract, two storage entries are created instead of updated, slightly increasing cost.
+5. **Network congestion** — During high-traffic periods, the Soroban fee market may require a higher base fee for timely inclusion. Resource fees are unaffected by congestion.
+6. **Protocol upgrades** — Soroban fee schedules are governed by validators and can change between protocol versions.
+
+### Estimating gas before submitting
+
+Use the Soroban RPC `simulateTransaction` endpoint to get exact fee estimates without spending XLM:
+
+```bash
+# Simulate via Stellar CLI (prints fee breakdown)
+stellar contract invoke \
+  --id <CONTRACT_ID> \
+  --network testnet \
+  --source mykey \
+  --fee 100000 \
+  -- support \
+  --s <SUPPORTER_ADDRESS> \
+  --r <RECIPIENT_ADDRESS> \
+  --asset <ASSET_ADDRESS> \
+  --o 10000000 \
+  --c XLM \
+  --m "Great work!" \
+  2>&1 | grep -E "(fee|instructions|memory)"
+```
+
+Or use the provided JavaScript estimation script:
+
+```bash
+# Install dependencies
+cd contract
+npm install @stellar/stellar-sdk
+
+# Run against testnet (set your contract ID first)
+CONTRACT_ID=C... node scripts/estimate-gas.js
+```
+
+The script (`scripts/estimate-gas.js`) simulates four scenarios — minimal, medium, long message, and max message — and prints CPU instructions, memory, and minimum resource fee for each.
+
+### Gas optimization techniques
+
+1. **Keep messages concise** — Every character in the `message` field adds to transaction size and argument-encoding cost. Encourage supporters to write meaningful but brief messages.
+2. **Batch off-chain, settle on-chain** — If you need to record many micro-supports, consider batching them off-chain and submitting a single aggregated transaction.
+3. **Reuse recipient entries** — The first support for a new recipient costs slightly more due to storage creation. Subsequent supports to the same recipient are cheaper.
+4. **Set a sensible fee bump budget** — Use `BASE_FEE = 1000` stroops (10× default) during peak hours. The Stellar CLI `--fee` flag accepts stroops.
+5. **Pre-fund the contract account** — Ensure the contract account has sufficient XLM for rent and minimum balance to avoid failed transactions due to insufficient funds.
+6. **Avoid unnecessary re-initialization** — `initialize()` stores admin and paused keys once. Calling it again returns an error (no wasted gas), but calling it in error paths wastes CPU.
+
+### Example: checking fee before submitting (JavaScript)
+
+```javascript
+import { SorobanRpc, TransactionBuilder, Networks, BASE_FEE } from "@stellar/stellar-sdk";
+
+const server = new SorobanRpc.Server("https://soroban-testnet.stellar.org");
+
+// Build transaction (see Contract Invocation section for full example)
+const tx = buildSupportTransaction(account, contract, params);
+
+// Simulate — no XLM spent
+const sim = await server.simulateTransaction(tx);
+
+if (!SorobanRpc.Api.isSimulationError(sim)) {
+  console.log("Min resource fee (stroops):", sim.minResourceFee);
+  console.log("CPU instructions:", sim.cost.cpuInsns);
+  console.log("Memory (bytes):", sim.cost.memBytes);
+
+  // Prepare and sign only after you are happy with the fee
+  const prepared = SorobanRpc.assembleTransaction(tx, sim).build();
+  prepared.sign(keypair);
+  await server.sendTransaction(prepared);
+}
+```
+
 ## Resources
 
 - **Stellar Laboratory:** https://laboratory.stellar.org (browser-based testnet account funding and transaction builder)

@@ -1756,7 +1756,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       }
 
       const { githubUsername, githubToken } = parsed.data;
-      const { username } = req.params;
+      const username = req.params.username as string;
 
       const profile = await prisma.profile.findUnique({ where: { username } });
       if (!profile) {
@@ -1854,7 +1854,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     requireAuth,
     resendLimiter,
     async (req, res) => {
-      const { username } = req.params;
+      const username = req.params.username as string;
       const userId = (req.auth!.userId || req.auth!.walletAddress) as string;
 
       try {
@@ -1909,7 +1909,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
   });
 
   v1Router.get("/profiles/:username/notification-preferences", requireAuth, async (req, res) => {
-    const { username } = req.params;
+    const username = req.params.username as string;
 
     const profile = await prisma.profile.findUnique({ where: { username } });
     if (!profile) return sendError(res, 404, "Profile not found");
@@ -1933,7 +1933,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
   });
 
   v1Router.patch("/profiles/:username/notification-preferences", requireAuth, writeLimiter, async (req, res) => {
-    const { username } = req.params;
+    const username = req.params.username as string;
 
     const parsed = notifPrefsSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -2574,37 +2574,29 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       return res.json(cached);
     }
 
-    const orderBy =
-      sort === "transaction_count"
-        ? [{ _count: { _all: "desc" as const } }, { _sum: { amount: "desc" as const } }]
-        : [{ _sum: { amount: "desc" as const } }, { _count: { _all: "desc" as const } }];
+    const allGrouped = await prisma.supportTransaction.groupBy({
+      by: ["supporterAddress", "assetCode"],
+      where: {
+        profileId: profile.id,
+        status: { not: "failed" },
+        supporterAddress: { not: null },
+      },
+      _sum: { amount: true },
+      _count: { _all: true },
+    });
 
-    const [grouped, total] = await Promise.all([
-      prisma.supportTransaction.groupBy({
-        by: ["supporterAddress", "assetCode"],
-        where: {
-          profileId: profile.id,
-          status: { not: "failed" },
-          supporterAddress: { not: null },
-        },
-        _sum: { amount: true },
-        _count: { _all: true },
-        orderBy,
-        take: limit,
-        skip: offset,
-      }),
-      prisma.supportTransaction.groupBy({
-        by: ["supporterAddress", "assetCode"],
-        where: {
-          profileId: profile.id,
-          status: { not: "failed" },
-          supporterAddress: { not: null },
-        },
-        _count: { _all: true },
-      }),
-    ]);
+    const sorted = allGrouped.slice().sort((a: any, b: any) => {
+      if (sort === "transaction_count") {
+        const diff = (b._count._all ?? 0) - (a._count._all ?? 0);
+        return diff !== 0 ? diff : Number(b._sum.amount ?? 0) - Number(a._sum.amount ?? 0);
+      }
+      const diff = Number(b._sum.amount ?? 0) - Number(a._sum.amount ?? 0);
+      return diff !== 0 ? diff : (b._count._all ?? 0) - (a._count._all ?? 0);
+    });
 
-    const leaderboard = grouped.map((entry: any, index: number) => ({
+    const paginated = sorted.slice(offset, offset + limit);
+
+    const leaderboard = paginated.map((entry: any, index: number) => ({
       rank: offset + index + 1,
       supporterAddress: entry.supporterAddress as string,
       assetCode: entry.assetCode,
@@ -2614,7 +2606,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
 
     const payload = {
       leaderboard,
-      total: total.length,
+      total: sorted.length,
       limit,
       offset,
       sort,
@@ -3659,7 +3651,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
    */
   v1Router.delete("/profiles/:username", requireAuth, writeLimiter, async (req, res) => {
     try {
-      const { username } = req.params;
+      const username = req.params.username as string;
 
       const user = await prisma.user.findFirst({
         where: { email: req.auth!.walletAddress },
@@ -3677,7 +3669,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
           milestones: { select: { id: true } },
           webhooks: { select: { id: true } },
         },
-      });
+      }) as any;
 
       if (!profile) {
         return sendError(res, 404, "Profile not found");
@@ -3706,7 +3698,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       });
 
       // Invalidate leaderboard cache
-      invalidateProfileLeaderboardCache();
+      invalidateProfileLeaderboardCache(profile.id);
 
       req.log.info({ username, profileId: profile.id }, "Profile deleted successfully");
 

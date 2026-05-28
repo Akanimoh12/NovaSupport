@@ -8,6 +8,7 @@ import { QRCodeButton } from "@/components/qr-code-button";
 import { EmptyState } from "@/components/empty-state";
 import { EmbedCodeGenerator } from "@/components/embed-widget";
 import { MilestoneCard } from "@/components/milestone-card";
+import { ActivityFeed } from "@/components/activity-feed";
 import { API_BASE_URL } from "@/lib/config";
 
 type PageProps = {

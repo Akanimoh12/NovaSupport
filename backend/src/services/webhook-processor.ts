@@ -43,7 +43,6 @@ export async function processPendingWebhookDeliveries() {
           data: {
             status: "success",
             attemptCount: delivery.attemptCount + 1,
-            nextRetryAt: null,
             lastError: null,
           },
         });
@@ -55,7 +54,7 @@ export async function processPendingWebhookDeliveries() {
       const nextAttempt = delivery.attemptCount + 1;
       const isFinalAttempt = nextAttempt >= BACKOFF_SCHEDULE.length + 1;
       
-      let nextRetryAt = null;
+      let nextRetryAt: Date | undefined;
       if (!isFinalAttempt) {
         const delaySec = BACKOFF_SCHEDULE[delivery.attemptCount];
         nextRetryAt = new Date(Date.now() + delaySec * 1000);

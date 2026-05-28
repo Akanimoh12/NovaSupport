@@ -236,7 +236,7 @@ function convertToCSV(analytics: any): string {
 
   const csv =
     [headers, ...rows]
-      .map((row) => row.map((cell) => `"${cell}"`).join(","))
+      .map((row) => row.map((cell: unknown) => `"${cell}"`).join(","))
       .join("\n") + "\n";
 
   return csv;

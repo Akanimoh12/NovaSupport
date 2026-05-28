@@ -54,6 +54,7 @@ describe("Analytics Tests", () => {
           amount: tx.amount,
           assetCode: "XLM",
           status: "SUCCESS",
+          stellarNetwork: "TESTNET",
           recipientAddress: "GTEST" + "A".repeat(51),
           supporterAddress: tx.supporter,
           profileId: testProfileId,
