@@ -5,6 +5,7 @@ import { Skeleton } from "../skeleton";
 import { Toast } from "../toast";
 import { QRCodeButton } from "../qr-code-button";
 import { ProfileTabs } from "../profile-tabs";
+import { AppShell } from "../app-shell";
 
 // Mock dependencies
 vi.mock("framer-motion", () => ({
@@ -27,6 +28,25 @@ vi.mock("lucide-react", () => ({
 vi.mock("next/link", () => ({
   default: ({ children, href }: any) => <a href={href}>{children}</a>,
 }));
+
+vi.mock("@/lib/config", () => ({
+  API_BASE_URL: "http://localhost:4000",
+  SITE_URL: "https://novasupport.app",
+}));
+
+vi.mock("@/lib/stellar", () => ({
+  getNetworkLabel: vi.fn(() => "Testnet"),
+}));
+
+vi.mock("@/components/wallet-connect", () => ({
+  WalletConnect: () => <div data-testid="wallet-connect">WalletConnect</div>,
+}));
+
+vi.mock("@/components/theme-toggle", () => ({
+  ThemeToggle: () => <button data-testid="theme-toggle">Toggle</button>,
+}));
+
+vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => {})));
 
 describe("Component Snapshots", () => {
   it("ProfileSkeleton matches snapshot", () => {
@@ -56,6 +76,15 @@ describe("Component Snapshots", () => {
 
   it("ProfileTabs matches snapshot", () => {
     const { container } = render(<ProfileTabs username="testuser" />);
+    expect(container).toMatchSnapshot();
+  });
+
+  it("AppShell matches snapshot", () => {
+    const { container } = render(
+      <AppShell>
+        <div data-testid="child-content">Page content</div>
+      </AppShell>,
+    );
     expect(container).toMatchSnapshot();
   });
 });

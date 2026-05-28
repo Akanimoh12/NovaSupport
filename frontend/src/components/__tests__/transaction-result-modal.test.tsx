@@ -42,9 +42,10 @@ describe("TransactionResultModal", () => {
   });
 
   it("renders with Confirming status initially", () => {
-    render(<TransactionResultModal {...defaultProps} />);
+    const { container } = render(<TransactionResultModal {...defaultProps} />);
     expect(screen.getByText(/Support Sent!/i)).toBeInTheDocument();
     expect(screen.getByText(/Confirming\.\.\./i)).toBeInTheDocument();
+    expect(container).toMatchSnapshot();
   });
 
   it("shows truncated tx hash", () => {

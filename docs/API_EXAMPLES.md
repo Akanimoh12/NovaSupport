@@ -610,6 +610,428 @@ console.log(health);
 // { ok: true, service: "NovaSupport backend", network: "Stellar Testnet", database: "connected" }
 ```
 
+## Delete Profile
+
+### 24. Delete Profile
+
+**cURL:**
+```bash
+curl -X DELETE http://localhost:4000/profiles/johndoe \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**JavaScript:**
+```javascript
+const response = await fetch('http://localhost:4000/profiles/johndoe', {
+  method: 'DELETE',
+  headers: {
+    'Authorization': 'Bearer YOUR_JWT_TOKEN'
+  }
+});
+
+console.log(response.status);
+// 204
+```
+
+## Notification Preferences
+
+### 25. Get Notification Preferences
+
+**cURL:**
+```bash
+curl http://localhost:4000/profiles/johndoe/notification-preferences \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**JavaScript:**
+```javascript
+const response = await fetch('http://localhost:4000/profiles/johndoe/notification-preferences', {
+  headers: {
+    'Authorization': 'Bearer YOUR_JWT_TOKEN'
+  }
+});
+
+const prefs = await response.json();
+console.log(prefs);
+// { notifyOnSupport: true, notifyOnMilestone: true, weeklyDigest: false }
+```
+
+### 26. Update Notification Preferences
+
+**cURL:**
+```bash
+curl -X PATCH http://localhost:4000/profiles/johndoe/notification-preferences \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "notifyOnSupport": true,
+    "notifyOnMilestone": false,
+    "weeklyDigest": true
+  }'
+```
+
+**JavaScript:**
+```javascript
+const response = await fetch('http://localhost:4000/profiles/johndoe/notification-preferences', {
+  method: 'PATCH',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer YOUR_JWT_TOKEN'
+  },
+  body: JSON.stringify({
+    notifyOnSupport: true,
+    notifyOnMilestone: false,
+    weeklyDigest: true
+  })
+});
+
+const updated = await response.json();
+console.log(updated);
+// { notifyOnSupport: true, notifyOnMilestone: false, weeklyDigest: true }
+```
+
+## GitHub Profile Import
+
+### 27. Import Profile from GitHub
+
+**cURL:**
+```bash
+curl -X POST http://localhost:4000/profiles/johndoe/import/github \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "githubHandle": "johndoe"
+  }'
+```
+
+**JavaScript:**
+```javascript
+const response = await fetch('http://localhost:4000/profiles/johndoe/import/github', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer YOUR_JWT_TOKEN'
+  },
+  body: JSON.stringify({
+    githubHandle: 'johndoe'
+  })
+});
+
+const updated = await response.json();
+console.log(updated);
+// Updated profile with bio, avatarUrl, websiteUrl populated from GitHub
+```
+
+## Transaction Export
+
+### 28. Export Transactions as CSV
+
+**cURL:**
+```bash
+curl "http://localhost:4000/profiles/johndoe/transactions/export" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -o transactions.csv
+```
+
+**JavaScript:**
+```javascript
+const response = await fetch('http://localhost:4000/profiles/johndoe/transactions/export', {
+  headers: {
+    'Authorization': 'Bearer YOUR_JWT_TOKEN'
+  }
+});
+
+const csv = await response.text();
+// "Created At","Amount","Asset","Supporter","Message",...
+```
+
+## Webhook Deliveries
+
+### 29. List Webhook Deliveries
+
+**cURL:**
+```bash
+curl "http://localhost:4000/profiles/johndoe/webhooks/webhook-id-123/deliveries?limit=20&offset=0" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**JavaScript:**
+```javascript
+const webhookId = 'webhook-id-123';
+const params = new URLSearchParams({ limit: '20', offset: '0' });
+const response = await fetch(
+  `http://localhost:4000/profiles/johndoe/webhooks/${webhookId}/deliveries?${params}`,
+  {
+    headers: { 'Authorization': 'Bearer YOUR_JWT_TOKEN' }
+  }
+);
+
+const deliveries = await response.json();
+console.log(deliveries);
+// { deliveries: [...], total: 5, limit: 20, offset: 0 }
+```
+
+## Milestones (Update & Delete)
+
+### 30. Update Milestone
+
+**cURL:**
+```bash
+curl -X PATCH http://localhost:4000/profiles/johndoe/milestones/milestone-id-123 \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "title": "Updated Title",
+    "description": "Updated description",
+    "targetAmount": "7500.0000000"
+  }'
+```
+
+**JavaScript:**
+```javascript
+const milestoneId = 'milestone-id-123';
+const response = await fetch(
+  `http://localhost:4000/profiles/johndoe/milestones/${milestoneId}`,
+  {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer YOUR_JWT_TOKEN'
+    },
+    body: JSON.stringify({
+      title: 'Updated Title',
+      description: 'Updated description',
+      targetAmount: '7500.0000000'
+    })
+  }
+);
+
+const milestone = await response.json();
+console.log(milestone);
+```
+
+### 31. Delete Milestone
+
+**cURL:**
+```bash
+curl -X DELETE http://localhost:4000/profiles/johndoe/milestones/milestone-id-123 \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**JavaScript:**
+```javascript
+const milestoneId = 'milestone-id-123';
+const response = await fetch(
+  `http://localhost:4000/profiles/johndoe/milestones/${milestoneId}`,
+  {
+    method: 'DELETE',
+    headers: { 'Authorization': 'Bearer YOUR_JWT_TOKEN' }
+  }
+);
+
+console.log(response.status);
+// 204
+```
+
+## Supporter Activity
+
+### 32. Get Supporter Activity by Wallet Address
+
+**cURL:**
+```bash
+curl "http://localhost:4000/supporters/GCZJM35NKGVK47BB4SPBDV25477PZYIYPVVG453LPYFNXLS3FGHDXOCM?limit=20&offset=0"
+```
+
+**JavaScript:**
+```javascript
+const address = 'GCZJM35NKGVK47BB4SPBDV25477PZYIYPVVG453LPYFNXLS3FGHDXOCM';
+const params = new URLSearchParams({ limit: '20', offset: '0' });
+const response = await fetch(`http://localhost:4000/supporters/${address}?${params}`);
+const data = await response.json();
+console.log(data);
+// { transactions: [...], total: 10, limit: 20, offset: 0 }
+```
+
+## Recurring Support
+
+### 33. Create Recurring Support
+
+**cURL:**
+```bash
+curl -X POST http://localhost:4000/recurring-support \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "profileId": "clx1234567890",
+    "amount": "10.0000000",
+    "assetCode": "XLM",
+    "frequency": "monthly",
+    "message": "Monthly support!"
+  }'
+```
+
+**JavaScript:**
+```javascript
+const response = await fetch('http://localhost:4000/recurring-support', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer YOUR_JWT_TOKEN'
+  },
+  body: JSON.stringify({
+    profileId: 'clx1234567890',
+    amount: '10.0000000',
+    assetCode: 'XLM',
+    frequency: 'monthly',
+    message: 'Monthly support!'
+  })
+});
+
+const plan = await response.json();
+console.log(plan);
+```
+
+### 34. List Recurring Support Plans
+
+**cURL:**
+```bash
+curl http://localhost:4000/recurring-support \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**JavaScript:**
+```javascript
+const response = await fetch('http://localhost:4000/recurring-support', {
+  headers: { 'Authorization': 'Bearer YOUR_JWT_TOKEN' }
+});
+
+const plans = await response.json();
+console.log(plans);
+// [{ id: "...", amount: "10.0000000", frequency: "monthly", status: "active", ... }]
+```
+
+### 35. Get Recurring Support Plan
+
+**cURL:**
+```bash
+curl http://localhost:4000/recurring-support/plan-id-123 \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**JavaScript:**
+```javascript
+const planId = 'plan-id-123';
+const response = await fetch(`http://localhost:4000/recurring-support/${planId}`, {
+  headers: { 'Authorization': 'Bearer YOUR_JWT_TOKEN' }
+});
+
+const plan = await response.json();
+console.log(plan);
+```
+
+### 36. Update Recurring Support Plan
+
+**cURL:**
+```bash
+curl -X PATCH http://localhost:4000/recurring-support/plan-id-123 \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "status": "paused"
+  }'
+```
+
+**JavaScript:**
+```javascript
+const planId = 'plan-id-123';
+const response = await fetch(`http://localhost:4000/recurring-support/${planId}`, {
+  method: 'PATCH',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer YOUR_JWT_TOKEN'
+  },
+  body: JSON.stringify({ status: 'paused' })
+});
+
+const updated = await response.json();
+console.log(updated);
+```
+
+### 37. Cancel Recurring Support Plan
+
+**cURL:**
+```bash
+curl -X DELETE http://localhost:4000/recurring-support/plan-id-123 \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**JavaScript:**
+```javascript
+const planId = 'plan-id-123';
+const response = await fetch(`http://localhost:4000/recurring-support/${planId}`, {
+  method: 'DELETE',
+  headers: { 'Authorization': 'Bearer YOUR_JWT_TOKEN' }
+});
+
+console.log(response.status);
+// 204
+```
+
+## Resend Email Verification
+
+### 38. Resend Verification Email
+
+**cURL:**
+```bash
+curl -X POST http://localhost:4000/profiles/johndoe/resend-verification \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**JavaScript:**
+```javascript
+const response = await fetch('http://localhost:4000/profiles/johndoe/resend-verification', {
+  method: 'POST',
+  headers: { 'Authorization': 'Bearer YOUR_JWT_TOKEN' }
+});
+
+const result = await response.json();
+console.log(result);
+// { ok: true, message: "Verification email sent" }
+```
+
+## Indexer Status
+
+### 39. Get Indexer Status
+
+**cURL:**
+```bash
+curl http://localhost:4000/indexer/status
+```
+
+**JavaScript:**
+```javascript
+const response = await fetch('http://localhost:4000/indexer/status');
+const status = await response.json();
+console.log(status);
+// { status: "running", lastProcessedLedger: 50123456, network: "TESTNET" }
+```
+
+## RSS Feed
+
+### 40. Get Profile Activity RSS Feed
+
+**cURL:**
+```bash
+curl http://localhost:4000/profiles/johndoe/feed.xml
+```
+
+**JavaScript:**
+```javascript
+const response = await fetch('http://localhost:4000/profiles/johndoe/feed.xml');
+const xml = await response.text();
+// Returns RSS/Atom XML feed of recent supporter activity
+```
+
 ## Error Responses
 
 All endpoints return consistent error responses:
