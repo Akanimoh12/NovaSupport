@@ -61,16 +61,40 @@ jobs:
       - name: Generate Prisma client
         run: npm run db:generate
 
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
       - name: Apply database migrations
         run: npm run db:migrate:deploy
 
       - name: Validate database migrations
         run: |
-          npx prisma migrate diff \
+          echo "::group::Checking for schema drift"
+          if ! npx prisma migrate diff \
             --from-schema-datamodel prisma/schema.prisma \
             --to-migrations prisma/migrations \
             --shadow-database-url "$DATABASE_URL" \
-            --exit-code
+            --exit-code; then
+            echo "::endgroup::"
+            echo ""
+            echo "============================================"
+            echo "  ❌ MIGRATION VALIDATION FAILED"
+            echo "============================================"
+            echo ""
+            echo "  Your Prisma schema has changes that are not"
+            echo "  reflected in the migrations directory."
+            echo ""
+            echo "  To fix this, create a new migration:"
+            echo ""
+            echo "    cd backend"
+            echo "    npx prisma migrate dev --name describe_your_changes"
+            echo ""
+            echo "  Then commit the generated migration files."
+            echo ""
+            exit 1
+          fi
+          echo "::endgroup::"
+          echo "✅ Schema and migrations are in sync."
         env:
           DATABASE_URL: ${{ env.DATABASE_URL }}
 
