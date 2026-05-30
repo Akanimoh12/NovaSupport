@@ -3416,26 +3416,120 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     }
   });
 
-  /**
-   * @openapi
-   * /profiles/{username}/badges:
-   *   get:
-   *     summary: Get badges for a profile
-   *     parameters:
-   *       - in: path
-   *         name: username
-   *         required: true
-   *         schema:
-   *           type: string
-   *     responses:
-   *       200:
-   *         description: List of badges for the profile
-   *       404:
-   *         description: Profile not found
-   *       500:
-   *         description: Internal server error
-   */
-  app.get("/profiles/:username/badges", async (req, res) => {
+  // ── Analytics Timeseries (profile-based, with period-over-period) ─────
+
+  const timeseriesPeriodSchema = z.enum(["daily", "weekly", "monthly"]);
+
+  function groupTransactionsByPeriod(
+    transactions: { createdAt: Date; amount: string }[],
+    period: string,
+    from: Date,
+    to: Date,
+  ) {
+    const buckets: Record<string, number> = {};
+    const fmt = period === "monthly" ? "yyyy-MM" : period === "weekly" ? "yyyy-ww" : "yyyy-MM-dd";
+
+    for (const tx of transactions) {
+      const d = tx.createdAt;
+      const key = period === "monthly"
+        ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+        : period === "weekly"
+          ? getWeekKey(d)
+          : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      buckets[key] = (buckets[key] || 0) + parseFloat(tx.amount.toString());
+    }
+
+    return Object.entries(buckets)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, amount]) => ({ date, amount: parseFloat(amount.toFixed(7)) }));
+  }
+
+  function getWeekKey(d: Date): string {
+    const start = new Date(d.getTime());
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - start.getDay());
+    return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
+  }
+
+  app.get("/profiles/:username/analytics/timeseries", async (req, res) => {
+    try {
+      const profile = await prisma.profile.findUnique({
+        where: { username: req.params.username },
+      });
+
+      if (!profile) {
+        return sendError(res, 404, "Profile not found");
+      }
+
+      const compare = req.query.compare === "true";
+      const periodParsed = timeseriesPeriodSchema.safeParse(req.query.period ?? "daily");
+      const period = periodParsed.success ? periodParsed.data : "daily";
+
+      const to = req.query.to ? new Date(req.query.to as string) : new Date();
+      const from = req.query.from
+        ? new Date(req.query.from as string)
+        : new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+      const currentTxs = await prisma.supportTransaction.findMany({
+        where: {
+          recipientAddress: profile.walletAddress,
+          createdAt: { gte: from, lte: to },
+        },
+        orderBy: { createdAt: "asc" },
+      });
+
+      const currentTotal = currentTxs.reduce((sum, tx) => sum + parseFloat(tx.amount.toString()), 0);
+      const currentTxCount = currentTxs.length;
+      const data = groupTransactionsByPeriod(currentTxs, period, from, to);
+
+      let previousTotal = 0;
+      let previousTxCount = 0;
+      let changePercent: number | null = null;
+      let txCountChangePercent: number | null = null;
+
+      if (compare) {
+        const periodMs = to.getTime() - from.getTime();
+        const prevFrom = new Date(from.getTime() - periodMs);
+        const prevTo = new Date(from.getTime());
+
+        const prevTxs = await prisma.supportTransaction.findMany({
+          where: {
+            recipientAddress: profile.walletAddress,
+            createdAt: { gte: prevFrom, lt: prevTo },
+          },
+        });
+
+        previousTotal = prevTxs.reduce((sum, tx) => sum + parseFloat(tx.amount.toString()), 0);
+        previousTxCount = prevTxs.length;
+
+        if (previousTotal > 0) {
+          changePercent = Math.round(((currentTotal - previousTotal) / previousTotal) * 10000) / 100;
+        }
+        if (previousTxCount > 0) {
+          txCountChangePercent = Math.round(((currentTxCount - previousTxCount) / previousTxCount) * 10000) / 100;
+        }
+      }
+
+      res.json({
+        period,
+        data,
+        summary: {
+          currentTotal: currentTotal.toFixed(7),
+          previousTotal: previousTotal.toFixed(7),
+          changePercent,
+          currentTxCount,
+          previousTxCount,
+          txCountChangePercent,
+        },
+      });
+    } catch {
+      return sendError(res, 500, "Internal server error");
+    }
+  });
+
+  // ── Profile Stats ──────────────────────────────────────────────────────
+
+  app.get("/profiles/:username/stats", async (req, res) => {
     try {
       const profile = await prisma.profile.findUnique({
         where: { username: req.params.username },
@@ -3616,6 +3710,131 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       });
 
       res.status(204).send();
+    } catch {
+      return sendError(res, 500, "Internal server error");
+    }
+  });
+
+  // ── Webhooks ───────────────────────────────────────────────────────────
+
+  const createWebhookSchema = z.object({
+    url: z.string().url().startsWith("https://"),
+  });
+
+  function generateSecret(): string {
+    const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let secret = "";
+    for (let i = 0; i < 48; i++) {
+      secret += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return secret;
+  }
+
+  app.get("/profiles/:username/webhooks", async (req, res) => {
+    try {
+      const profile = await prisma.profile.findUnique({
+        where: { username: req.params.username },
+      });
+
+      if (!profile) {
+        return sendError(res, 404, "Profile not found");
+      }
+
+      const webhooks = await prisma.webhook.findMany({
+        where: { profileId: profile.id },
+        orderBy: { createdAt: "desc" },
+      });
+
+      res.json({ webhooks });
+    } catch {
+      return sendError(res, 500, "Internal server error");
+    }
+  });
+
+  app.post("/profiles/:username/webhooks", async (req, res) => {
+    try {
+      const profile = await prisma.profile.findUnique({
+        where: { username: req.params.username },
+      });
+
+      if (!profile) {
+        return sendError(res, 404, "Profile not found");
+      }
+
+      const parsed = createWebhookSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return sendError(res, 400, "Invalid request body");
+      }
+
+      const secret = generateSecret();
+
+      const webhook = await prisma.webhook.create({
+        data: {
+          url: parsed.data.url,
+          secret,
+          profileId: profile.id,
+        },
+      });
+
+      res.status(201).json(webhook);
+    } catch {
+      return sendError(res, 500, "Internal server error");
+    }
+  });
+
+  app.delete("/profiles/:username/webhooks/:webhookId", async (req, res) => {
+    try {
+      const profile = await prisma.profile.findUnique({
+        where: { username: req.params.username },
+      });
+
+      if (!profile) {
+        return sendError(res, 404, "Profile not found");
+      }
+
+      const webhook = await prisma.webhook.findUnique({
+        where: { id: req.params.webhookId },
+      });
+
+      if (!webhook || webhook.profileId !== profile.id) {
+        return sendError(res, 404, "Webhook not found");
+      }
+
+      await prisma.webhook.delete({
+        where: { id: req.params.webhookId },
+      });
+
+      res.status(204).send();
+    } catch {
+      return sendError(res, 500, "Internal server error");
+    }
+  });
+
+  app.get("/profiles/:username/webhooks/:webhookId/deliveries", async (req, res) => {
+    try {
+      const profile = await prisma.profile.findUnique({
+        where: { username: req.params.username },
+      });
+
+      if (!profile) {
+        return sendError(res, 404, "Profile not found");
+      }
+
+      const webhook = await prisma.webhook.findUnique({
+        where: { id: req.params.webhookId },
+      });
+
+      if (!webhook || webhook.profileId !== profile.id) {
+        return sendError(res, 404, "Webhook not found");
+      }
+
+      const deliveries = await prisma.webhookDelivery.findMany({
+        where: { webhookId: webhook.id },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+      });
+
+      res.json({ deliveries });
     } catch {
       return sendError(res, 500, "Internal server error");
     }

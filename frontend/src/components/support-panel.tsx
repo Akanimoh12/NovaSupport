@@ -30,6 +30,9 @@ type Asset = {
   issuer?: string | null;
 };
 
+const FEE_IN_XLM = BASE_FEE / 10_000_000;
+const IS_TESTNET = STELLAR_NETWORK !== "PUBLIC";
+
 type SupportPanelProps = {
   walletAddress: string;
   acceptedAssets?: Asset[];
@@ -52,491 +55,51 @@ export function SupportPanel({
   const frequencyGroupId = "support-frequency";
 
   const [visitorAddress, setVisitorAddress] = useState<string | null>(null);
-  const [visitorBalances, setVisitorBalances] = useState<any[]>([]);
-  const [paymentAsset, setPaymentAsset] = useState<{
-    code: string;
-    issuer?: string;
-  } | null>(null);
   const [amount, setAmount] = useState("");
-  const [isSigning, setIsSigning] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [signedXdr, setSignedXdr] = useState<string | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [submittedHash, setSubmittedHash] = useState<string | null>(null);
-  const [showResultModal, setShowResultModal] = useState(false);
-  const [submissionNote, setSubmissionNote] = useState<string | null>(null);
-  const [lastTxDetails, setLastTxDetails] = useState<{
-    amount: string;
-    assetCode: string;
-  } | null>(null);
-  const [estimatedReceived, setEstimatedReceived] = useState<string | null>(
-    null,
-  );
-  const [isFindingPath, setIsFindingPath] = useState(false);
-  const [noPathFound, setNoPathFound] = useState(false);
-  const [isRecurring, setIsRecurring] = useState(false);
-  const [frequency, setFrequency] = useState<"weekly" | "monthly">("monthly");
-  const [recurringError, setRecurringError] = useState<string | null>(null);
-  const [message, setMessage] = useState("");
-  const [isAccountFunded, setIsAccountFunded] = useState(true);
-  const [isBalanceLoading, setIsBalanceLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [retryStatus, setRetryStatus] = useState<string | null>(null);
-  const { showToast } = useToast();
+  const [assetCode, setAssetCode] = useState("XLM");
+  const [balance, setBalance] = useState<string | null>(null);
+  const [balanceLoading, setBalanceLoading] = useState(false);
+  const [balanceError, setBalanceError] = useState<string | null>(null);
+  const [accountNotFound, setAccountNotFound] = useState(false);
 
-  const networkLabel = getNetworkLabel();
+  const loadBalance = async (address: string) => {
+    if (!address) return;
+    setBalanceLoading(true);
+    setBalanceError(null);
+    setAccountNotFound(false);
 
-  const recipientAsset = acceptedAssets?.[0] || { code: "XLM" };
-  const amountNum = parseFloat(amount);
-  
-  const selectedBalance = visitorBalances.find(b => 
-    paymentAsset?.code === "XLM" 
-      ? b.asset_type === "native" 
-      : b.asset_code === paymentAsset?.code && b.asset_issuer === paymentAsset?.issuer
-  );
-  const availableBalance = selectedBalance ? parseFloat(selectedBalance.balance) : 0;
-  
-  const isValidAmount = amountNum > 0;
-  const isOverBalance = amountNum > availableBalance;
-  const showError = amount !== "" && !isValidAmount;
-  const isProcessing = isSigning || isSubmitting || isFindingPath;
-
-  const handleCopy = useCallback(async () => {
     try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(walletAddress);
+      const account = await horizonServer.loadAccount(address);
+      const xlmBalance = account.balances.find(
+        (b: any) => b.asset_type === "native"
+      );
+      setBalance(xlmBalance ? xlmBalance.balance : "0");
+    } catch (err: any) {
+      if (err?.response?.status === 404 || err instanceof Horizon.NotFoundError) {
+        setAccountNotFound(true);
+        setBalance("0");
+        if (!IS_TESTNET) {
+          setBalanceError("Account not found on Stellar network");
+        }
       } else {
-        const textArea = document.createElement("textarea");
-        textArea.value = walletAddress;
-        textArea.style.position = "fixed";
-        textArea.style.left = "-9999px";
-        textArea.style.top = "0";
-        document.body.appendChild(textArea);
-        textArea.focus();
-        textArea.select();
-        const successful = document.execCommand("copy");
-        document.body.removeChild(textArea);
-        if (!successful) throw new Error("Fallback copy failed");
+        setBalanceError("Failed to load balance");
       }
-      showToast("Recipient address copied!", "success");
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error("Copy failed", err);
-      showToast("Failed to copy address", "error");
-    }
-  }, [walletAddress, showToast]);
-
-  const handleKeyDown = (e: KeyboardEvent) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === "c") {
-      e.preventDefault();
-      handleCopy();
+    } finally {
+      setBalanceLoading(false);
     }
   };
 
   useEffect(() => {
     if (visitorAddress) {
-      setIsBalanceLoading(true);
-      setIsAccountFunded(true);
-      setRetryStatus(null);
-      withStellarRetry(
-        () => horizonServer.loadAccount(visitorAddress),
-        {
-          onRetry: (info) => {
-            setRetryStatus(
-              `Stellar network issue — retrying (attempt ${info.attempt + 1} of 4)…`
-            );
-          },
-        },
-      )
-        .then((acc) => {
-          const balances = acc.balances.filter(
-            (b: any) => parseFloat(b.balance) > 0 || b.asset_type === "native",
-          );
-          setVisitorBalances(balances);
-          const xlm = balances.find((b: any) => b.asset_type === "native");
-          if (xlm) {
-            setPaymentAsset({ code: "XLM" });
-          } else if (balances.length > 0) {
-            const firstBalance = balances[0] as any;
-            if (firstBalance.asset_type !== "native") {
-              setPaymentAsset({
-                code: firstBalance.asset_code,
-                issuer: firstBalance.asset_issuer,
-              });
-            }
-          }
-          setRetryStatus(null);
-        })
-        .catch((err: any) => {
-          if (err?.response?.status === 404) {
-            setIsAccountFunded(false);
-          }
-          const classified = classifyStellarError(err);
-          if (classified.retryable) {
-            setRetryStatus(null);
-            setErrorMessage(
-              "Could not connect to the Stellar network. Please check your connection and try again."
-            );
-          }
-          console.error("Failed to load visitor account", err);
-        })
-        .finally(() => {
-          setIsBalanceLoading(false);
-        });
-    } else {
-      setVisitorBalances([]);
-      setPaymentAsset(null);
+      loadBalance(visitorAddress);
     }
   }, [visitorAddress]);
 
-  useEffect(() => {
-    const findPath = async () => {
-      if (!visitorAddress || !paymentAsset || !isValidAmount) {
-        setEstimatedReceived(null);
-        setNoPathFound(false);
-        return;
-      }
-
-      const isSameAsset =
-        paymentAsset.code === recipientAsset.code &&
-        (paymentAsset.code === "XLM" ||
-          paymentAsset.issuer === recipientAsset.issuer);
-
-      if (isSameAsset) {
-        setEstimatedReceived(amount);
-        setNoPathFound(false);
-        return;
-      }
-
-      setIsFindingPath(true);
-      setNoPathFound(false);
-      setErrorMessage(null);
-      try {
-        const sourceAsset =
-          paymentAsset.code === "XLM"
-            ? StellarAsset.native()
-            : new StellarAsset(paymentAsset.code, paymentAsset.issuer!);
-        const destAsset =
-          recipientAsset.code === "XLM"
-            ? StellarAsset.native()
-            : new StellarAsset(recipientAsset.code, recipientAsset.issuer!);
-
-        const paths = await withStellarRetry(
-          () => horizonServer.strictSendPaths(sourceAsset, amount, [destAsset]).call(),
-          {
-            onRetry: (info) => {
-              setErrorMessage(
-                `Finding exchange path — retrying (attempt ${info.attempt + 1} of 4)…`
-              );
-            },
-          },
-        );
-        if (paths.records.length > 0) {
-          setEstimatedReceived(paths.records[0].destination_amount);
-        } else {
-          setNoPathFound(true);
-          setEstimatedReceived(null);
-        }
-        setErrorMessage(null);
-      } catch (err) {
-        const classified = classifyStellarError(err);
-        setErrorMessage(classified.userMessage);
-        setNoPathFound(true);
-        console.error("Pathfinding error", err);
-      } finally {
-        setIsFindingPath(false);
-      }
-    };
-
-    const timer = setTimeout(findPath, 500);
-    return () => clearTimeout(timer);
-  }, [visitorAddress, paymentAsset, amount, recipientAsset, isValidAmount]);
-
-  function truncateHash(hash: string) {
-    return `${hash.slice(0, 8)}...${hash.slice(-8)}`;
-  }
-
-  function mapHorizonError(error: unknown): string {
-    const resultCodes =
-      error &&
-      typeof error === "object" &&
-      "response" in error &&
-      error.response &&
-      typeof error.response === "object" &&
-      "data" in error.response &&
-      error.response.data &&
-      typeof error.response.data === "object" &&
-      "extras" in error.response.data &&
-      error.response.data.extras &&
-      typeof error.response.data.extras === "object" &&
-      "result_codes" in error.response.data.extras
-        ? (error.response.data.extras.result_codes as {
-            transaction?: string;
-            operations?: string[];
-          })
-        : null;
-
-    const operationCode = resultCodes?.operations?.[0];
-    const transactionCode = resultCodes?.transaction;
-
-    if (operationCode === "op_underfunded") {
-      return "Insufficient balance";
-    }
-    if (transactionCode === "tx_too_late") return "Transaction expired";
-    if (transactionCode === "tx_bad_seq")
-      return "Transaction sequence is out of date. Please try again.";
-    if (transactionCode === "tx_insufficient_balance")
-      return "Insufficient balance";
-    if (transactionCode === "tx_bad_auth" || operationCode === "op_bad_auth")
-      return "Authorization failed. Please reconnect your wallet and try again.";
-
-    if (error instanceof Error && error.message) return error.message;
-    return "Unable to submit transaction to Stellar. Please try again.";
-  }
-
-
-
-  async function handleSendSupport() {
-    if (!visitorAddress || !isValidAmount || isProcessing || noPathFound) {
-      return;
-    }
-
-    // Full on-chain flow for issue #179:
-    // 1. Build transaction XDR with buildSupportIntent()
-    // 2. Sign with the connected wallet adapter
-    // 3. Broadcast to Horizon with submitTransaction()
-    // 4. Record in backend via POST /support-transactions
-    // 5. Show success modal with transaction hash
-
-    setErrorMessage(null);
-    setSubmittedHash(null);
-    setSignedXdr(null);
-    setRecurringError(null);
-    setSubmissionNote(null);
-    setIsSigning(true);
-
-    let resolvedSignedXdr: string;
-
-    try {
-      const isSameAsset =
-        paymentAsset?.code === recipientAsset.code &&
-        (paymentAsset?.code === "XLM" ||
-          paymentAsset?.issuer === recipientAsset.issuer);
-
-      let unsignedXdr: string;
-
-      if (isSameAsset) {
-        unsignedXdr = await buildSupportIntent({
-          sourceAccount: visitorAddress,
-          destination: walletAddress,
-          amount,
-          memo: message || undefined,
-          assetCode: recipientAsset?.issuer ? recipientAsset.code : undefined,
-          assetIssuer: recipientAsset?.issuer ?? undefined,
-        });
-      } else {
-        const sourceAsset =
-          paymentAsset?.code === "XLM"
-            ? StellarAsset.native()
-            : new StellarAsset(paymentAsset!.code, paymentAsset!.issuer!);
-        const destAsset =
-          recipientAsset.code === "XLM"
-            ? StellarAsset.native()
-            : new StellarAsset(recipientAsset.code, recipientAsset.issuer!);
-
-        unsignedXdr = await buildPathPaymentIntent({
-          sourceAccount: visitorAddress,
-          sourceAsset,
-          sourceAmount: amount,
-          destAsset,
-          destAddress: walletAddress,
-          memo: message || undefined,
-        });
-      }
-
-      // Open wallet signing prompt
-      const walletId = localStorage.getItem("walletId") as WalletId | null;
-      const adapter = walletId ? getWalletAdapter(walletId) : null;
-      if (!adapter) {
-        throw new Error("No wallet connected. Please connect a Stellar wallet.");
-      }
-
-      resolvedSignedXdr = await adapter.signTransaction(unsignedXdr, {
-        address: visitorAddress,
-        networkPassphrase: stellarConfig.networkPassphrase,
-      });
-
-      console.log(`Transaction signed by ${adapter.name}`);
-
-      setSignedXdr(resolvedSignedXdr);
-    } catch (signingError) {
-      setErrorMessage(mapWalletError(signingError));
-      setIsSigning(false);
-      return;
-    }
-
-    setIsSigning(false);
-    setIsSubmitting(true);
-
-    let response: any;
-    try {
-      setRetryStatus(null);
-      const transactionToSubmit = TransactionBuilder.fromXDR(
-        resolvedSignedXdr,
-        stellarConfig.networkPassphrase,
-      );
-
-      response = await withStellarRetry(
-        () => horizonServer.submitTransaction(transactionToSubmit),
-        {
-          onRetry: (info) => {
-            setRetryStatus(
-              `Submitting to Stellar network — retrying (attempt ${info.attempt + 1} of 4)…`
-            );
-          },
-        },
-      );
-
-      setRetryStatus(null);
-      console.log("Transaction submitted to Horizon:", response.hash);
-      let displayHash = response.hash;
-
-      // Record confirmed on-chain transaction in the backend
-      if (profileId) {
-        const recordInBackend = async (retries = 3, backoffMs = 1000) => {
-          for (let attempt = 1; attempt <= retries; attempt++) {
-            try {
-              const token = localStorage.getItem("authToken");
-              const backendRes = await fetch(`${API_BASE_URL}/support-transactions`, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                },
-                body: JSON.stringify({
-                  txHash: response.hash,
-                  amount,
-                  assetCode: paymentAsset?.code || "XLM",
-                  recipientAddress: walletAddress,
-                  profileId,
-                  message: message || undefined,
-                  memo: message || undefined,
-                }),
-              });
-
-              if (backendRes.status === 503 && attempt < retries) {
-                const delay = backoffMs * Math.pow(2, attempt - 1);
-                console.warn(`Backend 503, retrying in ${delay}ms (attempt ${attempt}/${retries})`);
-                await new Promise(r => setTimeout(r, delay));
-                continue;
-              }
-
-              if (!backendRes.ok) {
-                const data = await backendRes.json().catch(() => ({}));
-                if (backendRes.status === 429) {
-                  showToast(
-                    formatRateLimitedMessage(parseRateLimitInfo(backendRes.headers)),
-                    "error",
-                  );
-                } else if (backendRes.status === 409) {
-                  const duplicateHash =
-                    typeof data.existingTxHash === "string"
-                      ? data.existingTxHash
-                      : response.hash;
-                  displayHash = duplicateHash;
-                  setSubmissionNote("This transaction was already recorded");
-                  showToast("This transaction was already recorded", "success");
-                } else {
-                  console.error("Failed to record transaction in backend", data);
-                }
-              } else {
-                console.log("Transaction recorded in backend database");
-              }
-              break; // Success or non-retryable error
-            } catch (backendErr) {
-              if (attempt < retries) {
-                const delay = backoffMs * Math.pow(2, attempt - 1);
-                console.warn(`Backend connection error, retrying in ${delay}ms (attempt ${attempt}/${retries})`, backendErr);
-                await new Promise(r => setTimeout(r, delay));
-              } else {
-                console.error("Backend record error after retries", backendErr);
-              }
-            }
-          }
-        };
-
-        await recordInBackend();
-      }
-
-      setSubmittedHash(displayHash);
-      setLastTxDetails({
-        amount: amount,
-        assetCode: paymentAsset?.code || "XLM",
-      });
-      setShowResultModal(true);
-
-      // If recurring is enabled, set up the drip
-      if (isRecurring && profileId) {
-        try {
-          const token = localStorage.getItem("authToken");
-          const recurringResponse = await fetch(
-            `${API_BASE_URL}/recurring-support`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                ...(token ? { Authorization: `Bearer ${token}` } : {}),
-              },
-              body: JSON.stringify({
-                supporterAddress: visitorAddress,
-                recipientAddress: walletAddress,
-                profileId,
-                amount,
-                assetCode: recipientAsset?.code || "XLM",
-                assetIssuer: recipientAsset?.issuer,
-                frequency,
-                message: message || undefined,
-              }),
-            },
-          );
-
-          if (!recurringResponse.ok) {
-            if (recurringResponse.status === 429) {
-              showToast(
-                formatRateLimitedMessage(
-                  parseRateLimitInfo(recurringResponse.headers),
-                ),
-                "error",
-              );
-              throw new Error("Rate limited");
-            }
-            throw new Error("Failed to set up recurring support");
-          }
-        } catch (recurringErr) {
-          setRecurringError(
-            "On-chain payment succeeded, but drip setup failed. Please try setting up recurring support again.",
-          );
-        }
-      }
-
-      setAmount("");
-      setRetryStatus(null);
-    } catch (error) {
-      const classified = classifyStellarError(error);
-      if (classified.kind === "network" || classified.kind === "server_error" || classified.kind === "rate_limited") {
-        setRetryStatus(null);
-        setErrorMessage(
-          "Unable to reach the Stellar network after multiple attempts. Your transaction is still in your wallet — please try again later."
-        );
-      } else {
-        setErrorMessage(mapHorizonError(error));
-      }
-    } finally {
-      setIsSigning(false);
-      setIsSubmitting(false);
-    }
-  }
+  const parsedAmount = parseFloat(amount);
+  const hasValidAmount = !isNaN(parsedAmount) && parsedAmount > 0;
+  const parsedBalance = balance ? parseFloat(balance) : 0;
+  const totalNeeded = hasValidAmount ? parsedAmount + FEE_IN_XLM : 0;
+  const insufficientBalance = hasValidAmount && totalNeeded > parsedBalance;
 
   if (!visitorAddress) {
     return (
@@ -814,96 +377,133 @@ export function SupportPanel({
         )}
       </div>
 
-      {retryStatus && (
-        <div className="mt-4 rounded-2xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-200 flex items-center gap-2">
-          <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-          </svg>
-          {retryStatus}
+      {accountNotFound && IS_TESTNET && (
+        <div className="mt-4 rounded-2xl border border-gold/20 bg-gold/5 p-4">
+          <p className="text-sm text-sky/85">
+            Your account isn&apos;t funded on Testnet yet.
+          </p>
+          <div className="mt-3 flex items-center gap-3">
+            <a
+              href={`https://friendbot.stellar.org/?addr=${visitorAddress}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-lg bg-mint px-4 py-2 text-xs font-semibold text-black hover:bg-mint/90 transition-colors"
+            >
+              Fund with Friendbot &rarr;
+            </a>
+            <button
+              onClick={() => loadBalance(visitorAddress)}
+              disabled={balanceLoading}
+              className="rounded-lg bg-white/5 px-4 py-2 text-xs font-semibold text-steel hover:bg-white/10 transition-colors disabled:opacity-50"
+            >
+              {balanceLoading ? "Refreshing..." : "Refresh balance"}
+            </button>
+          </div>
         </div>
       )}
 
-      {errorMessage && (
-        <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-          {errorMessage}
+      {accountNotFound && !IS_TESTNET && (
+        <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/5 p-4">
+          <p className="text-sm text-red-400">
+            Account not found on Stellar network
+          </p>
         </div>
       )}
 
-      {recurringError && (
-        <div className="mt-4 rounded-2xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-200">
-          {recurringError}
-        </div>
-      )}
-
-
-      <button
-        type="button"
-        onClick={handleSendSupport}
-        disabled={!isValidAmount || isProcessing || noPathFound || isOverBalance || !isAccountFunded}
-        aria-label={
-          isSubmitting
-            ? "Submitting to Stellar network"
-            : isSigning
-              ? "Waiting for wallet signature"
-              : isFindingPath
-                ? "Finding best exchange path"
-                : `Send support to ${recipientDisplayName}`
-        }
-        aria-busy={isProcessing}
-        className="mt-6 w-full rounded-full bg-mint px-5 py-3 text-sm font-semibold text-ink transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-mint flex items-center justify-center gap-2"
-      >
-        {isProcessing && (
-          <svg
-            className="animate-spin h-4 w-4"
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
+      {balanceError && !accountNotFound && (
+        <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/5 p-4">
+          <p className="text-sm text-red-400">{balanceError}</p>
+          <button
+            onClick={() => loadBalance(visitorAddress)}
+            disabled={balanceLoading}
+            className="mt-2 rounded-lg bg-white/5 px-3 py-1 text-xs font-semibold text-steel hover:bg-white/10 transition-colors disabled:opacity-50"
           >
-            <circle
-              className="opacity-25"
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              strokeWidth="4"
-            />
-            <path
-              className="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-            />
-          </svg>
-        )}
-        <span>
-          {isSubmitting
-            ? "Submitting to Stellar network…"
-            : isSigning
-              ? "Waiting for wallet signature…"
-              : isFindingPath
-                ? "Finding best exchange path…"
-                : "Send Support"}
-        </span>
-      </button>
+            {balanceLoading ? "Refreshing..." : "Refresh balance"}
+          </button>
+        </div>
+      )}
 
-      {/* Transaction Result Modal */}
-      <TransactionResultModal
-        isOpen={showResultModal}
-        onClose={() => {
-          setShowResultModal(false);
-          setAmount("");
-          setMessage("");
-          setSubmittedHash(null);
-          setErrorMessage(null);
-          setRecurringError(null);
-          setSubmissionNote(null);
-        }}
-        txHash={submittedHash}
-        amount={lastTxDetails?.amount || ""}
-        assetCode={lastTxDetails?.assetCode || "XLM"}
-        recipientDisplayName={recipientDisplayName}
-        note={submissionNote}
-      />
+      {!accountNotFound && balance !== null && (
+        <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+          <div className="flex items-center justify-between">
+            <p className="text-xs uppercase tracking-[0.2em] text-sky/70">Your Balance</p>
+            <button
+              onClick={() => loadBalance(visitorAddress)}
+              disabled={balanceLoading}
+              className="text-[10px] uppercase tracking-wider text-steel hover:text-white transition-colors disabled:opacity-50"
+            >
+              {balanceLoading ? "..." : "Refresh"}
+            </button>
+          </div>
+          <p className="mt-1 text-lg font-semibold text-white tabular-nums">
+            {parseFloat(balance).toFixed(7)} XLM
+          </p>
+        </div>
+      )}
+
+      <div className="mt-6 space-y-4">
+        <div>
+          <label className="text-xs font-semibold text-steel uppercase tracking-wider">
+            Amount
+          </label>
+          <div className="mt-2 flex gap-2">
+            <input
+              type="number"
+              step="0.0000001"
+              min="0"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0.00"
+              className="flex-1 rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-sm text-white placeholder:text-steel/50 focus:outline-none focus:border-mint/50"
+            />
+            <select
+              value={assetCode}
+              onChange={(e) => setAssetCode(e.target.value)}
+              className="rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-sm text-white focus:outline-none focus:border-mint/50"
+            >
+              <option value="XLM">XLM</option>
+              <option value="USDC">USDC</option>
+              <option value="AQUA">AQUA</option>
+            </select>
+          </div>
+        </div>
+
+        {hasValidAmount && (
+          <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-3">
+            <div className="flex items-center justify-between text-xs text-steel">
+              <span>Network fee</span>
+              <span className="tabular-nums">~{FEE_IN_XLM.toFixed(7)} XLM</span>
+            </div>
+            {assetCode !== "XLM" && (
+              <p className="mt-1 text-[10px] text-steel/60">
+                Path payments may incur slightly higher fees due to additional operations
+              </p>
+            )}
+          </div>
+        )}
+
+        {insufficientBalance && (
+          <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-3">
+            <p className="text-xs text-red-400">
+              Insufficient balance. You need at least {totalNeeded.toFixed(7)} XLM
+              (including ~{FEE_IN_XLM.toFixed(7)} XLM network fee).
+            </p>
+          </div>
+        )}
+
+        <button
+          type="button"
+          disabled={!hasValidAmount || insufficientBalance}
+          className="w-full rounded-lg bg-mint px-4 py-3 text-sm font-semibold text-black hover:bg-mint/90 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+        >
+          Send Support
+        </button>
+      </div>
+
+      <p className="mt-4 text-xs leading-6 text-steel">
+        This builds and signs a Stellar payment using Freighter.
+        The transaction hash is stored on the NovaSupport backend.
+      </p>
     </section>
   );
 }
