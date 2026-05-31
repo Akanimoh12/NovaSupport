@@ -44,6 +44,7 @@ import {
   verifyTransaction as verifyTransactionService,
   type ExpectedTxDetails,
 } from "./services/verify-transaction.js";
+import { checkAndAwardBadges } from "./services/badge-awarder.js";
 
 // Extend Express Request to include auth context
 declare global {
@@ -1196,12 +1197,16 @@ All errors return JSON with an \`error\` field and optional \`code\`:
 
       // Attempt to increment view count; viewCountLimiter will skip duplicate
       // IPs within the same hour window (applied as middleware below).
-      void prisma.profile.update({
-        where: { id: profile.id },
-        data: { viewCount: { increment: 1 } },
-      }).catch(() => {
-        // Non-fatal — do not block the response
-      });
+      // Skip increment if the viewer is the profile owner (#542).
+      const isOwner = req.auth?.userId && profile.ownerId === req.auth.userId;
+      if (!isOwner) {
+        void prisma.profile.update({
+          where: { id: profile.id },
+          data: { viewCount: { increment: 1 } },
+        }).catch(() => {
+          // Non-fatal — do not block the response
+        });
+      }
 
       const responseBody: Record<string, unknown> = { ...profile };
       if (req.auth) {
@@ -2221,6 +2226,11 @@ All errors return JSON with an \`error\` field and optional \`code\`:
    *           enum: [date, amount]
    *           default: date
    *         description: Sort transactions by date (newest first) or amount (highest first)
+   *       - in: query
+   *         name: q
+   *         schema:
+   *           type: string
+   *         description: Text search filter — returns only transactions whose message contains this string (case-insensitive, max 100 chars)
    *     responses:
    *       200:
    *         description: Paginated list of transactions
@@ -2307,6 +2317,8 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     const network = req.query.network as string | undefined;
     const status = req.query.status as string | undefined;
     const assetCode = req.query.assetCode as string | undefined;
+    const rawQ = req.query.q as string | undefined;
+    const q = rawQ?.trim().slice(0, 100) || undefined;
 
     // Validate sortBy — only "date" and "amount" are accepted
     const rawSortBy = req.query.sortBy as string | undefined;
@@ -2328,6 +2340,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       ...(network ? { stellarNetwork: network } : {}),
       ...(status ? { status } : {}),
       ...(assetCode ? { assetCode } : {}),
+      ...(q ? { message: { contains: q, mode: "insensitive" as const } } : {}),
     };
 
     // Sort by date (newest first) or amount (highest first)
@@ -2346,7 +2359,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       prisma.supportTransaction.count({ where }),
     ]);
 
-    res.json({ transactions, total, limit, offset, sortBy });
+    res.json({ transactions, total, limit, offset, sortBy, ...(q ? { q } : {}) });
   });
 
   // ── Export transactions for tax reporting ──────────────────────────────
@@ -3003,6 +3016,14 @@ All errors return JSON with an \`error\` field and optional \`code\`:
           );
         }
       })();
+
+      // Auto-award badges (fire-and-forget, never blocks the response) (#545)
+      checkAndAwardBadges(supportRecord.profileId).catch((err) => {
+        logger.error(
+          { err, txHash: supportRecord.txHash },
+          "Error in checkAndAwardBadges",
+        );
+      });
 
       req.log.info(
         { txHash: supportRecord.txHash },

@@ -96,6 +96,7 @@ import { startDripScheduler } from "./services/drip-scheduler.js";
 import { startWebhookProcessor } from "./services/webhook-processor.js";
 import { EventIndexer } from "./services/event-indexer.js";
 import { createSorobanRpcClient } from "./services/soroban-rpc-client.js";
+import { startWeeklyDigestScheduler } from "./services/weekly-digest.js";
 import { prisma } from "./db.js";
 
 const port = Number(process.env.PORT ?? 4000);
@@ -131,6 +132,9 @@ app.listen(port, () => {
 
   // Start the recurring drip scheduler if enabled
   startDripScheduler();
+
+  // Start the weekly digest email scheduler
+  startWeeklyDigestScheduler();
 
   // Start the webhook delivery processor
   startWebhookProcessor();

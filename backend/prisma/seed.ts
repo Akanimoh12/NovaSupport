@@ -39,6 +39,22 @@ async function main() {
     }
   });
 
+  // Seed badge definitions for auto-award system (#545)
+  const badgeDefinitions = [
+    { name: "First Supporter", description: "Received your very first support transaction", icon: "🎉", criteria: "first_support" },
+    { name: "10 Supporters", description: "10 unique supporters have contributed to your profile", icon: "🌟", criteria: "ten_supporters" },
+    { name: "100 XLM Club", description: "Received 100+ XLM in total support", icon: "💎", criteria: "total_100_xlm" },
+    { name: "Milestone Maker", description: "Reached at least one milestone", icon: "🏆", criteria: "milestone_reached" },
+  ];
+
+  for (const badge of badgeDefinitions) {
+    await prisma.badge.upsert({
+      where: { name: badge.name },
+      update: {},
+      create: badge,
+    });
+  }
+
   await prisma.supportTransaction.upsert({
     where: { txHash: "demo-tx-hash-stellar-testnet" },
     update: {},
