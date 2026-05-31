@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   History, Award, LayoutDashboard,
   ExternalLink, Search, Calendar, X
@@ -21,7 +21,6 @@ type Transaction = {
   supporterAddress?: string;
   createdAt: string;
   status: string;
-//   message?: string;
   memo?: string | null;
 };
 
@@ -107,8 +106,10 @@ export function ProfileTabs({ username }: { username: string }) {
     window.history.replaceState(null, "", newHash);
   }, []);
 
-  // ── Search state (#472) ────────────────────────────────────────────────────
+  // ── Search state (#554) ────────────────────────────────────────────────────
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Date filter state (#461) ───────────────────────────────────────────────
   const [preset, setPreset] = useState<DatePreset>("all");
@@ -121,10 +122,29 @@ export function ProfileTabs({ username }: { username: string }) {
     FAILED:  "bg-red-100 text-red-800",
   };
 
+  // Debounce search term 300ms then update debouncedSearch
+  const handleSearchChange = useCallback((value: string) => {
+    setSearch(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setDebouncedSearch(value);
+    }, 300);
+  }, []);
+
+  // Cleanup debounce on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
+
   useEffect(() => {
     if (activeTab === "history") {
       setLoading(true);
-      fetch(`${API_BASE_URL}/profiles/${username}/transactions`)
+      const params = new URLSearchParams();
+      if (debouncedSearch.trim()) params.set("q", debouncedSearch.trim());
+      const url = `${API_BASE_URL}/profiles/${username}/transactions${params.toString() ? "?" + params.toString() : ""}`;
+      fetch(url)
         .then(res => res.json())
         .then(data => {
           setTransactions(data.transactions || []);
@@ -140,13 +160,12 @@ export function ProfileTabs({ username }: { username: string }) {
         .catch(err => console.error(err))
         .finally(() => setBadgesLoading(false));
     }
-  }, [username, activeTab]);
+  }, [username, activeTab, debouncedSearch]);
 
-  // ── Filtered transactions ──────────────────────────────────────────────────
+  // ── Filtered transactions (date only; search handled by API) ──────────────
   const filtered = useMemo(() => {
     let result = transactions;
 
-    // Date range filter
     const { from, to } = preset === "custom"
       ? {
           from: customFrom ? new Date(customFrom) : null,
@@ -157,23 +176,12 @@ export function ProfileTabs({ username }: { username: string }) {
     if (from) result = result.filter(tx => new Date(tx.createdAt) >= from);
     if (to)   result = result.filter(tx => new Date(tx.createdAt) <= to);
 
-    // Search filter (#472) — supporter address, message, amount
-    const q = search.trim().toLowerCase();
-    if (q) {
-      result = result.filter(tx => {
-        const addr    = (tx.supporterAddress ?? "").toLowerCase();
-        const msg     = (tx.message ?? "").toLowerCase();
-        const amount  = tx.amount.toLowerCase();
-        const asset   = tx.assetCode.toLowerCase();
-        return addr.includes(q) || msg.includes(q) || amount.includes(q) || asset.includes(q);
-      });
-    }
-
     return result;
-  }, [transactions, search, preset, customFrom, customTo]);
+  }, [transactions, preset, customFrom, customTo]);
 
   const clearFilters = () => {
     setSearch("");
+    setDebouncedSearch("");
     setPreset("all");
     setCustomFrom("");
     setCustomTo("");
@@ -220,16 +228,28 @@ export function ProfileTabs({ username }: { username: string }) {
           >
             {/* ── Search & filter toolbar ────────────────────────────────── */}
             <div className="flex flex-col sm:flex-row gap-3">
-              {/* Search input (#472) */}
+              {/* Search input (#554) */}
               <div className="relative flex-1">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-steel" />
                 <input
                   type="text"
                   value={search}
-                  onChange={e => setSearch(e.target.value)}
-                  placeholder="Search address, message, amount…"
-                  className="w-full rounded-xl border border-white/10 bg-white/5 pl-9 pr-4 py-2 text-sm text-white placeholder:text-steel focus:border-mint/40 focus:outline-none focus:ring-1 focus:ring-mint/30 transition"
+                  onChange={e => handleSearchChange(e.target.value)}
+                  placeholder="Search by message…"
+                  className="w-full rounded-xl border border-white/10 bg-white/5 pl-9 pr-9 py-2 text-sm text-white placeholder:text-steel focus:border-mint/40 focus:outline-none focus:ring-1 focus:ring-mint/30 transition"
                 />
+                {search && (
+                  <button
+                    onClick={() => {
+                      setSearch("");
+                      setDebouncedSearch("");
+                    }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-steel hover:text-white transition"
+                    aria-label="Clear search"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
               </div>
 
               {/* Date range preset buttons (#461) */}
@@ -373,24 +393,33 @@ export function ProfileTabs({ username }: { username: string }) {
                 </table>
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                {transactions.length > 0 ? (
-                  <>
-                    <p className="text-gray-500 font-medium">No matching transactions</p>
-                    <p className="text-sm text-gray-400 mt-1">Try adjusting your search or date filters.</p>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-gray-500 font-medium">No support yet</p>
-                    <p className="text-sm text-gray-400 mt-1">Be the first to support {username}!</p>
-                  </>
-                )}
-              </div>
-              <EmptyState
-                variant="transactions"
-                title="No transactions yet"
-                description="Be the first to support this creator!"
-              />
+              <>
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  {transactions.length > 0 ? (
+                    debouncedSearch ? (
+                      <>
+                        <p className="text-gray-500 font-medium">No transactions match your search</p>
+                        <p className="text-sm text-gray-400 mt-1">Try a different keyword.</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-gray-500 font-medium">No matching transactions</p>
+                        <p className="text-sm text-gray-400 mt-1">Try adjusting your search or date filters.</p>
+                      </>
+                    )
+                  ) : (
+                    <>
+                      <p className="text-gray-500 font-medium">No support yet</p>
+                      <p className="text-sm text-gray-400 mt-1">Be the first to support {username}!</p>
+                    </>
+                  )}
+                </div>
+                <EmptyState
+                  variant="no-transactions"
+                  title="No transactions yet"
+                  description="Be the first to support this creator!"
+                />
+              </>
             )}
           </motion.div>
         ) : (

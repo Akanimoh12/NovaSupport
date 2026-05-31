@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
+import { Check } from "lucide-react";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
@@ -21,9 +22,10 @@ export function NotificationPreferences({ username }: Props) {
     weeklyDigest: false,
   });
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState<string | null>(null);
+  const [saved, setSaved] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
+  const [emailVerified, setEmailVerified] = useState<boolean | null>(null);
 
   useEffect(() => {
     const token = localStorage.getItem("authToken");
@@ -32,51 +34,68 @@ export function NotificationPreferences({ username }: Props) {
       return;
     }
 
-    fetch(`${API_BASE_URL}/profiles/${username}/notification-preferences`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data) setPrefs(data);
+    Promise.all([
+      fetch(`${API_BASE_URL}/profiles/${username}/notification-preferences`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      fetch(`${API_BASE_URL}/profiles/${username}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    ])
+      .then(([prefsRes, profileRes]) =>
+        Promise.all([
+          prefsRes.ok ? prefsRes.json() : null,
+          profileRes.ok ? profileRes.json() : null,
+        ]),
+      )
+      .then(([prefsData, profileData]) => {
+        if (prefsData) setPrefs(prefsData);
+        if (profileData) setEmailVerified(profileData.emailVerified ?? false);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [username]);
 
-  const handleToggle = (key: keyof Prefs) => {
-    setPrefs((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
+  const handleToggle = useCallback(
+    async (key: keyof Prefs) => {
+      const newValue = !prefs[key];
+      setPrefs((prev) => ({ ...prev, [key]: newValue }));
+      setSaving(key);
+      setError(null);
 
-  const handleSave = async () => {
-    setSaving(true);
-    setError(null);
-    try {
-      const token = localStorage.getItem("authToken");
-      const res = await fetch(
-        `${API_BASE_URL}/profiles/${username}/notification-preferences`,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      try {
+        const token = localStorage.getItem("authToken");
+        const res = await fetch(
+          `${API_BASE_URL}/profiles/${username}/notification-preferences`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ [key]: newValue }),
           },
-          body: JSON.stringify(prefs),
-        },
-      );
+        );
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error ?? "Failed to save preferences");
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error ?? "Failed to save preference");
+        }
+
+        setSaved((prev) => ({ ...prev, [key]: true }));
+        setTimeout(
+          () => setSaved((prev) => ({ ...prev, [key]: false })),
+          2000,
+        );
+      } catch (err: unknown) {
+        setPrefs((prev) => ({ ...prev, [key]: !newValue }));
+        setError(err instanceof Error ? err.message : "Something went wrong");
+      } finally {
+        setSaving(null);
       }
-
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
-      setSaving(false);
-    }
-  };
+    },
+    [prefs, username],
+  );
 
   if (loading) return null;
 
@@ -101,37 +120,41 @@ export function NotificationPreferences({ username }: Props) {
           label="New support received"
           description="Get an email when someone sends you support."
           checked={prefs.notifyOnSupport}
+          saving={saving === "notifyOnSupport"}
+          saved={!!saved.notifyOnSupport}
           onToggle={() => handleToggle("notifyOnSupport")}
           toggleClass={toggleClass}
           knobClass={knobClass}
         />
         <PreferenceRow
           label="Milestone reached"
-          description="Get an email when a funding goal is completed."
+          description="Notify me when one of my funding goals is reached."
           checked={prefs.notifyOnMilestone}
+          saving={saving === "notifyOnMilestone"}
+          saved={!!saved.notifyOnMilestone}
           onToggle={() => handleToggle("notifyOnMilestone")}
           toggleClass={toggleClass}
           knobClass={knobClass}
         />
         <PreferenceRow
           label="Weekly digest"
-          description="Receive a weekly summary of your support activity."
+          description="Send me a weekly summary of my support activity."
           checked={prefs.weeklyDigest}
+          saving={saving === "weeklyDigest"}
+          saved={!!saved.weeklyDigest}
           onToggle={() => handleToggle("weeklyDigest")}
           toggleClass={toggleClass}
           knobClass={knobClass}
         />
       </div>
 
-      {error && <p className="text-xs text-red-400">{error}</p>}
+      {emailVerified === false && (
+        <p className="text-xs text-amber-400">
+          Verify your email to receive notifications
+        </p>
+      )}
 
-      <button
-        onClick={handleSave}
-        disabled={saving}
-        className="min-h-[44px] w-full rounded-xl bg-[#00e5b0] px-4 py-2 text-sm font-semibold text-black hover:bg-[#00c99a] transition-colors disabled:opacity-50"
-      >
-        {saving ? "Saving…" : saved ? "Saved!" : "Save preferences"}
-      </button>
+      {error && <p className="text-xs text-red-400">{error}</p>}
     </section>
   );
 }
@@ -140,6 +163,8 @@ function PreferenceRow({
   label,
   description,
   checked,
+  saving,
+  saved,
   onToggle,
   toggleClass,
   knobClass,
@@ -147,6 +172,8 @@ function PreferenceRow({
   label: string;
   description: string;
   checked: boolean;
+  saving: boolean;
+  saved: boolean;
   onToggle: () => void;
   toggleClass: (on: boolean) => string;
   knobClass: (on: boolean) => string;
@@ -157,14 +184,23 @@ function PreferenceRow({
         <p className="text-sm font-medium text-white">{label}</p>
         <p className="text-xs text-white/40 mt-0.5">{description}</p>
       </div>
-      <button
-        role="switch"
-        aria-checked={checked}
-        onClick={onToggle}
-        className={toggleClass(checked)}
-      >
-        <span className={knobClass(checked)} />
-      </button>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        {saved && (
+          <span className="flex items-center gap-0.5 text-[10px] text-mint">
+            <Check size={10} />
+            Saved
+          </span>
+        )}
+        <button
+          role="switch"
+          aria-checked={checked}
+          onClick={onToggle}
+          disabled={saving}
+          className={toggleClass(checked)}
+        >
+          <span className={knobClass(checked)} />
+        </button>
+      </div>
     </div>
   );
 }
