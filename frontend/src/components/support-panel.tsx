@@ -31,7 +31,7 @@ type Asset = {
   issuer?: string | null;
 };
 
-const FEE_IN_XLM = BASE_FEE / 10_000_000;
+const FEE_IN_XLM = Number(BASE_FEE) / 10_000_000;
 const IS_TESTNET = STELLAR_NETWORK !== "PUBLIC";
 
 type SupportPanelProps = {
