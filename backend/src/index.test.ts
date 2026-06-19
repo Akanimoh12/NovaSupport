@@ -138,7 +138,7 @@ async function main() {
       assert.equal(body.ok, true);
       assert.equal(body.service, "NovaSupport backend");
       assert.equal(body.network, "Stellar Testnet");
-      assert.equal(body.database, "connected");
+      assert.equal(body.checks.database.status, "up");
     });
 
     await runTest("returns a seeded profile with accepted assets", async () => {

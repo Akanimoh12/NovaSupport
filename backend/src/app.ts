@@ -798,7 +798,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
    *           maximum: 100
    *           default: 20
    *           example: 20
-   *         description: Number of profiles to return (Min: 1, Max: 100)
+   *         description: "Number of profiles to return (Min: 1, Max: 100)"
    *       - in: query
    *         name: offset
    *         schema:
@@ -2263,14 +2263,14 @@ All errors return JSON with an \`error\` field and optional \`code\`:
    *           minimum: 1
    *           maximum: 100
    *           default: 20
-   *         description: Number of transactions to return (Min: 1, Max: 100)
+   *         description: "Number of transactions to return (Min: 1, Max: 100)"
    *       - in: query
    *         name: offset
    *         schema:
    *           type: integer
    *           minimum: 0
    *           default: 0
-   *         description: Number of transactions to skip (Min: 0)
+   *         description: "Number of transactions to skip (Min: 0)"
    *       - in: query
    *         name: network
    *         schema:
@@ -3209,14 +3209,14 @@ All errors return JSON with an \`error\` field and optional \`code\`:
    *           minimum: 1
    *           maximum: 100
    *           default: 20
-   *         description: Number of recent transactions to return (Min: 1, Max: 100)
+   *         description: "Number of recent transactions to return (Min: 1, Max: 100)"
    *       - in: query
    *         name: offset
    *         schema:
    *           type: integer
    *           minimum: 0
    *           default: 0
-   *         description: Number of recent transactions to skip (Min: 0)
+   *         description: "Number of recent transactions to skip (Min: 0)"
    *       - in: query
    *         name: format
    *         schema:
