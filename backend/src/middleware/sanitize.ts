@@ -138,7 +138,10 @@ function normalizeUrl(value: string): { url: string | null; violations: string[]
       return { url: null, violations };
     }
 
-    return { url: url.href, violations };
+    // url.href adds a trailing slash to bare origins (e.g. "https://stellar.example/").
+    // Strip it only when the original had no path and no trailing slash.
+    const href = url.pathname === "/" && !value.endsWith("/") ? url.href.slice(0, -1) : url.href;
+    return { url: href, violations };
   } catch (error) {
     violations.push("Invalid URL format");
     return { url: null, violations };

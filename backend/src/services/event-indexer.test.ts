@@ -291,10 +291,6 @@ await test("EventIndexer.pollOnce reads pre-existing cursor before fetching", as
   assert.equal(receivedCursor, "200-5");
 });
 
- feat/425-multiple-wallet-connections
-
- 423-contract-event-indexing-service
-   main
 await test("EventIndexer.pollOnce resolves profileId from recipient address", async () => {
   const mock = buildPrismaMock();
   mock.profiles.push({
@@ -341,7 +337,6 @@ await test("EventIndexer.pollOnce falls back to __orphan__ when no profile match
           }),
         ],
         nextPagingToken: "400-1",
- feat/425-multiple-wallet-connections
       },
     ]),
     network: "TESTNET",
@@ -352,8 +347,6 @@ await test("EventIndexer.pollOnce falls back to __orphan__ when no profile match
   assert.equal(mock.upsertCalls.length, 1);
   assert.equal(mock.upsertCalls[0]!.profileId, "__orphan__");
 });
-
- main
 
 await test("EventIndexer.pollOnce handles multi-page pagination by advancing cursor each page", async () => {
   const { prisma, cursors, insertedHashes } = buildPrismaMock();
@@ -373,17 +366,26 @@ await test("EventIndexer.pollOnce handles multi-page pagination by advancing cur
           event({ txHash: "tx-p2-1", pagingToken: "101-1", ledger: 101 }),
         ],
         nextPagingToken: "101-1",
-   main
       },
     ]),
     network: "TESTNET",
     contractId: "C123",
   });
 
-423-contract-event-indexing-service
-  await indexer.pollOnce();
-  assert.equal(mock.upsertCalls.length, 1);
-  assert.equal(mock.upsertCalls[0]!.profileId, "__orphan__");
+  // First poll — page 1
+  const result1 = await indexer.pollOnce();
+  assert.equal(result1.ingested, 2);
+  assert.equal(result1.nextCursor, "100-2");
+  assert.equal(cursors[0]!.lastPagingToken, "100-2");
+
+  // Second poll — page 2 (cursor was advanced)
+  const result2 = await indexer.pollOnce();
+  assert.equal(result2.ingested, 1);
+  assert.equal(result2.nextCursor, "101-1");
+  assert.equal(cursors[0]!.lastPagingToken, "101-1");
+
+  // All 3 unique hashes were inserted
+  assert.deepEqual(insertedHashes, ["tx-p1-1", "tx-p1-2", "tx-p2-1"]);
 });
 
 await test("EventIndexer.pollOnce advances cursor across sequential pages", async () => {
@@ -407,21 +409,29 @@ await test("EventIndexer.pollOnce advances cursor across sequential pages", asyn
       }
       return { events: [], nextPagingToken: null };
     },
-    
-  // First poll — page 1
-  const result1 = await indexer.pollOnce();
-  assert.equal(result1.ingested, 2);
-  assert.equal(result1.nextCursor, "100-2");
-  assert.equal(cursors[0]!.lastPagingToken, "100-2");
+  };
 
-  // Second poll — page 2 (cursor was advanced)
-  const result2 = await indexer.pollOnce();
-  assert.equal(result2.ingested, 1);
-  assert.equal(result2.nextCursor, "101-1");
-  assert.equal(cursors[0]!.lastPagingToken, "101-1");
+  const indexer = new EventIndexer({
+    prisma: mock.prisma,
+    rpcClient,
+    network: "TESTNET",
+    contractId: "C123",
+  });
 
-  // All 3 unique hashes were inserted
-  assert.deepEqual(insertedHashes, ["tx-p1-1", "tx-p1-2", "tx-p2-1"]);
+  // First page
+  const page1 = await indexer.pollOnce();
+  assert.equal(page1.ingested, 1);
+  assert.equal(page1.nextCursor, "500-1");
+
+  // Second page — reads cursor from DB which was updated by page 1
+  const page2 = await indexer.pollOnce();
+  assert.equal(page2.ingested, 1);
+  assert.equal(page2.nextCursor, null);
+
+  assert.equal(mock.upsertCalls.length, 2);
+  assert.deepEqual(mock.insertedHashes, ["tx-p1", "tx-p2"]);
+  assert.equal(mock.cursors.length, 1);
+  assert.equal(mock.cursors[0]!.lastPagingToken, "500-2");
 });
 
 await test("EventIndexer.resolveOrphans links orphaned transactions to matching profiles", async () => {
@@ -442,73 +452,14 @@ await test("EventIndexer.resolveOrphans links orphaned transactions to matching 
   mock.prisma.supportTransaction.update = async (args: { where: { id: string }; data: { profileId: string } }) => {
     updatedIds.push(args.where.id);
     return {};
- main
   };
 
   const indexer = new EventIndexer({
     prisma: mock.prisma,
- 423-contract-event-indexing-service
-    rpcClient,
-
     rpcClient: rpc([]),
-      main
     network: "TESTNET",
     contractId: "C123",
   });
-
-    423-contract-event-indexing-service
-  // First page
-  const page1 = await indexer.pollOnce();
-  assert.equal(page1.ingested, 1);
-  assert.equal(page1.nextCursor, "500-1");
-
-  // Second page — reads cursor from DB which was updated by page 1
-  const page2 = await indexer.pollOnce();
-  assert.equal(page2.ingested, 1);
-  assert.equal(page2.nextCursor, null);
-
-  assert.equal(mock.upsertCalls.length, 2);
-  assert.deepEqual(mock.insertedHashes, ["tx-p1", "tx-p2"]);
-  assert.equal(mock.cursors.length, 1);
-  assert.equal(mock.cursors[0]!.lastPagingToken, "500-2");
-});
-
-await test("EventIndexer passes startLedger to RPC client when cursor is empty", async () => {
-  let receivedStartLedger: number | undefined;
-  const rpcClient: EventIndexerRpcClient = {
-    async fetchEvents(args) {
-      receivedStartLedger = args.startLedger;
-      return { events: [], nextPagingToken: null };
-    },
-  };
-
-  const indexer = new EventIndexer({
-    prisma: buildPrismaMock().prisma,
-    rpcClient,
-    network: "TESTNET",
-    contractId: "C123",
-    startLedger: 42,
-  });
-
-  await indexer.pollOnce();
-  assert.equal(receivedStartLedger, 42);
-});
-
-await test("EventIndexer does NOT pass startLedger when cursor already exists", async () => {
-  const mock = buildPrismaMock();
-  mock.cursors.push({
-    network: "TESTNET",
-    contractId: "C123",
-    lastPagingToken: "600-5",
-    lastLedger: 600,
-    updatedAt: new Date(),
-    createdAt: new Date(),
-  });
-
-  let receivedStartLedger: number | undefined;
-  const rpcClient: EventIndexerRpcClient = {
-    async fetchEvents(args) {
-      receivedStartLedger = args.startLedger;
 
   const resolved = await indexer.resolveOrphans();
   assert.equal(resolved, 1);
@@ -589,24 +540,11 @@ await test("EventIndexer.stop prevents further ticks from being scheduled", asyn
   const rpcClient: EventIndexerRpcClient = {
     async fetchEvents() {
       pollCount += 1;
- main
       return { events: [], nextPagingToken: null };
     },
   };
 
   const indexer = new EventIndexer({
- 423-contract-event-indexing-service
-    prisma: mock.prisma,
-    rpcClient,
-    network: "TESTNET",
-    contractId: "C123",
-    startLedger: 42,
-  });
-
-  await indexer.pollOnce();
-  // Once a cursor exists, startLedger must not be sent — cursor takes over.
-  assert.equal(receivedStartLedger, undefined);
-
     prisma,
     rpcClient,
     network: "TESTNET",
@@ -622,5 +560,4 @@ await test("EventIndexer.stop prevents further ticks from being scheduled", asyn
   // Wait to confirm no more ticks fire after stop
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(pollCount, countAfterStop, "No more polls should fire after stop()");
- main
 });

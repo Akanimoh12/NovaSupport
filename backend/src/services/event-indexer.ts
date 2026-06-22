@@ -1,11 +1,4 @@
- feat/425-multiple-wallet-connections
 // #281 / #423: Contract event indexing service.
-
- 423-contract-event-indexing-service
-// #281 / #423: Contract event indexing service.
-
-// #321: Contract event indexing service.
- main
 
 //
 // Polls Soroban RPC for `SupportEvent`s emitted by the configured contract
@@ -319,10 +312,6 @@ export class EventIndexer {
   private async tick(): Promise<void> {
     if (this.stopped) return;
     try {
- feat/425-multiple-wallet-connections
-
- 423-contract-event-indexing-service
-     main
       let totalIngested = 0;
       let pages = 0;
       // Drain multiple pages per tick so large event histories (backfill)
@@ -338,15 +327,10 @@ export class EventIndexer {
           { ingested: totalIngested, pages, contractId: this.contractId },
           "indexed events",
         );
-
-      const { ingested } = await this.pollOnce();
-      if (ingested > 0) {
-        logger.info({ ingested, contractId: this.contractId }, "indexed events");
         // Resolve orphaned transactions after ingesting new events
         await this.resolveOrphans().catch((err) => {
           logger.warn({ err }, "orphan resolution failed — will retry next tick");
         });
- main
       }
     } finally {
       this.scheduleNextTick(this.pollIntervalMs);

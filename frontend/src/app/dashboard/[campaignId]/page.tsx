@@ -281,6 +281,12 @@ export default function DashboardPage() {
   const [drips, setDrips] = useState<RecurringDrip[]>([]);
   const [dripsLoading, setDripsLoading] = useState(true);
   const [dripActionLoading, setDripActionLoading] = useState<string | null>(null);
+  const [trends, setTrends] = useState({
+    totalRaised: "—",
+    totalRaisedPositive: true,
+    txCount: "—",
+    txCountPositive: true,
+  });
 
   useEffect(() => {
     async function fetchData() {

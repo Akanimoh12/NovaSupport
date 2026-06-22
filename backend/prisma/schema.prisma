@@ -180,7 +180,7 @@ model RecurringSupport {
   amount      Decimal  @db.Decimal(18, 7)
   assetCode   String   @default("XLM")
   frequency   String
-  nextRunAt   DateTime
+  nextRunAt   DateTime @default(now())
   status      String   @default("active")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

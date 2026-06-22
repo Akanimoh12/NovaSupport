@@ -69,31 +69,31 @@ jobs:
 
       - name: Validate database migrations
         run: |
-          echo "::group::Checking for schema drift"
-          if ! npx prisma migrate diff \
+          set +e
+          DRIFT=$(npx prisma migrate diff \
             --from-schema-datamodel prisma/schema.prisma \
             --to-migrations prisma/migrations \
             --shadow-database-url "$DATABASE_URL" \
-            --exit-code; then
-            echo "::endgroup::"
+            --exit-code 2>&1)
+          DRIFT_EXIT=$?
+          set -e
+          echo "::group::Schema drift diff output"
+          echo "$DRIFT"
+          echo "::endgroup::"
+          if [ $DRIFT_EXIT -ne 0 ]; then
             echo ""
             echo "============================================"
             echo "  ❌ MIGRATION VALIDATION FAILED"
             echo "============================================"
             echo ""
-            echo "  Your Prisma schema has changes that are not"
-            echo "  reflected in the migrations directory."
+            echo "  Drift detected — see diff output above."
             echo ""
-            echo "  To fix this, create a new migration:"
-            echo ""
+            echo "  To fix: create a new migration:"
             echo "    cd backend"
             echo "    npx prisma migrate dev --name describe_your_changes"
             echo ""
-            echo "  Then commit the generated migration files."
-            echo ""
             exit 1
           fi
-          echo "::endgroup::"
           echo "✅ Schema and migrations are in sync."
         env:
           DATABASE_URL: ${{ env.DATABASE_URL }}

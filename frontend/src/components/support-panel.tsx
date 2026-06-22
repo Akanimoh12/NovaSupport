@@ -7,7 +7,6 @@ import {
   BASE_FEE,
   Horizon,
   TransactionBuilder,
-  BASE_FEE,
 } from "@stellar/stellar-sdk";
 import {
   buildSupportIntent,
@@ -125,9 +124,10 @@ export function SupportPanel({
 
   useEffect(() => {
     if (!visitorAddress) return;
+    const address = visitorAddress;
     async function fetchBalances() {
       try {
-        const account = await horizonServer.loadAccount(visitorAddress);
+        const account = await horizonServer.loadAccount(address);
         setVisitorBalances(account.balances as any[]);
       } catch {
         setVisitorBalances([]);
@@ -149,42 +149,6 @@ export function SupportPanel({
   const isOverBalance = insufficientBalance;
   const isValidAmount = hasValidAmount;
   const recipientAsset = { code: "XLM" };
-
-  // State for enhanced payment UI (path payments, recurring, copy)
-  const [paymentAsset, setPaymentAsset] = useState<{ code: string; issuer?: string } | null>({ code: "XLM" });
-  const [visitorBalances, setVisitorBalances] = useState<any[]>([]);
-  const [isBalanceLoading, setIsBalanceLoading] = useState(false);
-  const [isAccountFunded, setIsAccountFunded] = useState(true);
-  const [availableBalance, setAvailableBalance] = useState(0);
-  const [showError, setShowError] = useState(false);
-  const [isOverBalance, setIsOverBalance] = useState(false);
-  const [isValidAmount, setIsValidAmount] = useState(false);
-  const [estimatedReceived, setEstimatedReceived] = useState<string | null>(null);
-  const [recipientAsset, setRecipientAsset] = useState<{ code: string; issuer?: string }>({ code: "XLM" });
-  const [noPathFound, setNoPathFound] = useState(false);
-  const [message, setMessage] = useState("");
-  const [isRecurring, setIsRecurring] = useState(false);
-  const [frequency, setFrequency] = useState<"weekly" | "monthly">("monthly");
-  const [copied, setCopied] = useState(false);
-
-  // Suppress unused variable warnings
-  void setVisitorBalances; void setIsBalanceLoading; void setIsAccountFunded;
-  void setAvailableBalance; void setShowError; void setIsOverBalance;
-  void setIsValidAmount; void setEstimatedReceived; void setRecipientAsset;
-  void setNoPathFound; void setFrequency;
-
-  function handleCopy() {
-    navigator.clipboard.writeText(walletAddress).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }).catch(() => {});
-  }
-
-  function handleKeyDown(e: KeyboardEvent<HTMLElement>) {
-    if ((e.ctrlKey || e.metaKey) && e.key === "c") {
-      handleCopy();
-    }
-  }
 
   if (!visitorAddress) {
     return (
@@ -215,7 +179,7 @@ export function SupportPanel({
           Recipient Address
         </p>
         <div className="flex items-center p-3 rounded-xl bg-white/5 border border-white/10 group">
-          <code 
+          <code
             onKeyDown={handleKeyDown}
             tabIndex={0}
             aria-label={`Recipient Stellar wallet address: ${walletAddress}. Press Ctrl+C to copy.`}
@@ -223,7 +187,7 @@ export function SupportPanel({
           >
             {walletAddress}
           </code>
-          <button 
+          <button
             onClick={handleCopy}
             aria-label="Copy recipient address to clipboard"
             title="Copy to clipboard"
@@ -249,7 +213,7 @@ export function SupportPanel({
         Support intent
       </p>
       <h2 className="mt-3 text-2xl font-semibold text-white">
-        Select assets & support
+        Select assets &amp; support
       </h2>
 
       <div className="mt-6 space-y-4">
@@ -320,9 +284,9 @@ export function SupportPanel({
                 {isBalanceLoading ? (
                   <span className="animate-pulse">Fetching balance...</span>
                 ) : !isAccountFunded ? (
-                  <a 
-                    href="https://laboratory.stellar.org/#friendbot" 
-                    target="_blank" 
+                  <a
+                    href="https://laboratory.stellar.org/#friendbot"
+                    target="_blank"
                     className="text-yellow-500 hover:underline"
                   >
                     Account not funded (Testnet)
@@ -393,7 +357,7 @@ export function SupportPanel({
           >
             Leave a message (optional)
           </label>
-          <span className={`text-[10px] font-medium ${message.length >= 28 ? 'text-red-400' : 'text-sky/40'}`}>
+          <span className={`text-[10px] font-medium ${message.length >= 28 ? "text-red-400" : "text-sky/40"}`}>
             {message.length} / 28
           </span>
         </div>
@@ -508,82 +472,36 @@ export function SupportPanel({
         </div>
       )}
 
-      {!accountNotFound && balance !== null && (
-        <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
-          <div className="flex items-center justify-between">
-            <p className="text-xs uppercase tracking-[0.2em] text-sky/70">Your Balance</p>
-            <button
-              onClick={() => loadBalance(visitorAddress)}
-              disabled={balanceLoading}
-              className="text-[10px] uppercase tracking-wider text-steel hover:text-white transition-colors disabled:opacity-50"
-            >
-              {balanceLoading ? "..." : "Refresh"}
-            </button>
+      {hasValidAmount && (
+        <div className="mt-4 rounded-2xl border border-white/5 bg-white/[0.03] p-3">
+          <div className="flex items-center justify-between text-xs text-steel">
+            <span>Network fee</span>
+            <span className="tabular-nums">~{FEE_IN_XLM.toFixed(7)} XLM</span>
           </div>
-          <p className="mt-1 text-lg font-semibold text-white tabular-nums">
-            {parseFloat(balance).toFixed(7)} XLM
+          {assetCode !== "XLM" && (
+            <p className="mt-1 text-[10px] text-steel/60">
+              Path payments may incur slightly higher fees due to additional operations
+            </p>
+          )}
+        </div>
+      )}
+
+      {insufficientBalance && (
+        <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/5 p-3">
+          <p className="text-xs text-red-400">
+            Insufficient balance. You need at least {totalNeeded.toFixed(7)} XLM
+            (including ~{FEE_IN_XLM.toFixed(7)} XLM network fee).
           </p>
         </div>
       )}
 
-      <div className="mt-6 space-y-4">
-        <div>
-          <label className="text-xs font-semibold text-steel uppercase tracking-wider">
-            Amount
-          </label>
-          <div className="mt-2 flex gap-2">
-            <input
-              type="number"
-              step="0.0000001"
-              min="0"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="0.00"
-              className="flex-1 rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-sm text-white placeholder:text-steel/50 focus:outline-none focus:border-mint/50"
-            />
-            <select
-              value={assetCode}
-              onChange={(e) => setAssetCode(e.target.value)}
-              className="rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-sm text-white focus:outline-none focus:border-mint/50"
-            >
-              <option value="XLM">XLM</option>
-              <option value="USDC">USDC</option>
-              <option value="AQUA">AQUA</option>
-            </select>
-          </div>
-        </div>
-
-        {hasValidAmount && (
-          <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-3">
-            <div className="flex items-center justify-between text-xs text-steel">
-              <span>Network fee</span>
-              <span className="tabular-nums">~{FEE_IN_XLM.toFixed(7)} XLM</span>
-            </div>
-            {assetCode !== "XLM" && (
-              <p className="mt-1 text-[10px] text-steel/60">
-                Path payments may incur slightly higher fees due to additional operations
-              </p>
-            )}
-          </div>
-        )}
-
-        {insufficientBalance && (
-          <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-3">
-            <p className="text-xs text-red-400">
-              Insufficient balance. You need at least {totalNeeded.toFixed(7)} XLM
-              (including ~{FEE_IN_XLM.toFixed(7)} XLM network fee).
-            </p>
-          </div>
-        )}
-
-        <button
-          type="button"
-          disabled={!hasValidAmount || insufficientBalance}
-          className="w-full rounded-lg bg-mint px-4 py-3 text-sm font-semibold text-black hover:bg-mint/90 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-        >
-          Send Support
-        </button>
-      </div>
+      <button
+        type="button"
+        disabled={!hasValidAmount || insufficientBalance}
+        className="mt-6 w-full rounded-lg bg-mint px-4 py-3 text-sm font-semibold text-black hover:bg-mint/90 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+      >
+        Send Support
+      </button>
 
       <p className="mt-4 text-xs leading-6 text-steel">
         This builds and signs a Stellar payment using Freighter.

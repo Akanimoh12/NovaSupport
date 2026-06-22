@@ -116,6 +116,13 @@ async function stopServer() {
   await prisma.$disconnect();
 }
 
+// Username suffixes from raw UUID can contain "010", "011", etc. which
+// triggers the confusing-pattern validator (3+ consecutive [l01O] chars).
+// Strip 0 and 1 to guarantee all generated usernames pass validation.
+function safeSuffix() {
+  return randomUUID().replace(/[01]/g, "a").slice(0, 8);
+}
+
 async function runTest(name: string, fn: () => Promise<void>) {
   try {
     await fn();
@@ -138,7 +145,7 @@ async function main() {
       assert.equal(body.ok, true);
       assert.equal(body.service, "NovaSupport backend");
       assert.equal(body.network, "Stellar Testnet");
-      assert.equal(body.database, "connected");
+      assert.equal(body.checks.database.status, "up");
     });
 
     await runTest("returns a seeded profile with accepted assets", async () => {
@@ -260,7 +267,7 @@ async function main() {
     });
 
     await runTest("GET /profiles supports search across username/displayName with trim and 100-char cap", async () => {
-      const suffix = randomUUID().slice(0, 8);
+      const suffix = safeSuffix();
       const displayNameNeedle = `Needle ${suffix}`;
       const oversizedSearch = `   ${"a".repeat(120)}   `;
       const usernameMatch = `search-user-${suffix}`;
@@ -624,7 +631,7 @@ async function main() {
         headers: getAuthHeaders(),
         body: JSON.stringify({
           ...validProfilePayload,
-          username: `social-test-${randomUUID().slice(0, 8)}`,
+          username: `social-test-${safeSuffix()}`,
           email: "social@example.com",
           websiteUrl: "https://example.com",
           twitterHandle: "testhandle",
@@ -641,14 +648,14 @@ async function main() {
     });
 
     await runTest("POST /profiles - returns 409 EMAIL_TAKEN for duplicate email", async () => {
-      const dupEmail = `dup-${randomUUID().slice(0, 8)}@example.com`;
+      const dupEmail = `dup-${safeSuffix()}@example.com`;
 
       await fetch(`${baseUrl}/profiles`, {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
           ...validProfilePayload,
-          username: `first-${randomUUID().slice(0, 8)}`,
+          username: `first-${safeSuffix()}`,
           email: dupEmail,
         }),
       });
@@ -658,7 +665,7 @@ async function main() {
         headers: getAuthHeaders(),
         body: JSON.stringify({
           ...validProfilePayload,
-          username: `second-${randomUUID().slice(0, 8)}`,
+          username: `second-${safeSuffix()}`,
           email: dupEmail,
         }),
       });
@@ -674,7 +681,7 @@ async function main() {
         headers: getAuthHeaders(),
         body: JSON.stringify({
           ...validProfilePayload,
-          username: `inv-email-${randomUUID().slice(0, 8)}`,
+          username: `inv-email-${safeSuffix()}`,
           email: "not-an-email",
         }),
       });
@@ -688,7 +695,7 @@ async function main() {
         headers: getAuthHeaders(),
         body: JSON.stringify({
           ...validProfilePayload,
-          username: `inv-url-${randomUUID().slice(0, 8)}`,
+          username: `inv-url-${safeSuffix()}`,
           websiteUrl: "http://example.com",
         }),
       });
@@ -696,14 +703,16 @@ async function main() {
       assert.equal(response.status, 400);
     });
 
-    await runTest("POST /profiles - returns 400 for twitterHandle with @ prefix", async () => {
+    await runTest("POST /profiles - returns 400 for twitterHandle with only invalid characters", async () => {
+      // sanitizeSocialHandle strips non-alphanumeric chars; a handle of only
+      // special chars reduces to "" which then fails Zod's regex validation.
       const response = await fetch(`${baseUrl}/profiles`, {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
           ...validProfilePayload,
-          username: `inv-twit-${randomUUID().slice(0, 8)}`,
-          twitterHandle: "@testhandle",
+          username: `inv-twit-${safeSuffix()}`,
+          twitterHandle: "!@#$%^&*()",
         }),
       });
 
@@ -781,7 +790,7 @@ async function main() {
           "authorization": `Bearer ${token}`,
         },
         body: JSON.stringify({
-          username: `auth-test-${randomUUID().slice(0, 8)}`,
+          username: `auth-test-${safeSuffix()}`,
           displayName: "Auth Test User",
           walletAddress: testWalletAddress,
           acceptedAssets: [{ code: "XLM" }],
@@ -843,7 +852,7 @@ async function main() {
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          username: `no-auth-${randomUUID().slice(0, 8)}`,
+          username: `no-auth-${safeSuffix()}`,
           displayName: "No Auth User",
           walletAddress: "GCZJM35NKGVK47BB4SPBDV25477PZYIYPVVG453LPYFNXLS3FGHDXOCM",
           acceptedAssets: [{ code: "XLM" }],
@@ -863,7 +872,7 @@ async function main() {
           "authorization": "Bearer invalid.token.here",
         },
         body: JSON.stringify({
-          username: `bad-token-${randomUUID().slice(0, 8)}`,
+          username: `bad-token-${safeSuffix()}`,
           displayName: "Bad Token User",
           walletAddress: "GCZJM35NKGVK47BB4SPBDV25477PZYIYPVVG453LPYFNXLS3FGHDXOCM",
           acceptedAssets: [{ code: "XLM" }],
@@ -883,7 +892,7 @@ async function main() {
           "authorization": "InvalidFormat token",
         },
         body: JSON.stringify({
-          username: `malformed-${randomUUID().slice(0, 8)}`,
+          username: `malformed-${safeSuffix()}`,
           displayName: "Malformed Auth User",
           walletAddress: "GCZJM35NKGVK47BB4SPBDV25477PZYIYPVVG453LPYFNXLS3FGHDXOCM",
           acceptedAssets: [{ code: "XLM" }],
@@ -914,7 +923,7 @@ async function main() {
           "authorization": `Bearer ${token}`,
         },
         body: JSON.stringify({
-          username: `userid-test-${randomUUID().slice(0, 8)}`,
+          username: `userid-test-${safeSuffix()}`,
           displayName: "User ID Test",
           walletAddress: testWalletAddress,
           acceptedAssets: [{ code: "XLM" }],
@@ -929,8 +938,10 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error("Backend tests failed.");
-  console.error(error);
-  process.exit(1);
-});
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error("Backend tests failed.");
+    console.error(error);
+    process.exit(1);
+  });
