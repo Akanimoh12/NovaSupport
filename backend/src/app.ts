@@ -1380,16 +1380,23 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     githubHandle: z
       .string()
       .max(39)
-      .regex(/^[a-zA-Z0-9-]+$/)
+      .regex(/^[a-zA-Z0-9][a-zA-Z0-9.-]{0,37}[a-zA-Z0-9]$/)
       .optional()
       .nullable(),
     // ownerId removed - now derived from JWT
     acceptedAssets: z
       .array(
-        z.object({
-          code: z.string().min(1).max(12),
-          issuer: z.string().optional(),
-        }),
+        z
+          .object({
+            code: z.string().min(1).max(12),
+            issuer: z.string().optional(),
+          })
+          .refine(
+            (asset) =>
+              asset.code.toUpperCase() === "XLM" ||
+              (typeof asset.issuer === "string" && asset.issuer.trim().length > 0),
+            { message: "issuer is required for non-XLM assets" },
+          ),
       )
       .min(1),
   });
@@ -1643,7 +1650,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     githubHandle: z
       .string()
       .max(39)
-      .regex(/^[a-zA-Z0-9-]+$/)
+      .regex(/^[a-zA-Z0-9][a-zA-Z0-9.-]{0,37}[a-zA-Z0-9]$/)
       .optional()
       .nullable(),
   });
@@ -1892,13 +1899,13 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     writeLimiter,
     async (req, res) => {
       const importSchema = z.object({
-        githubUsername: z.string().min(1).max(39).regex(/^[a-zA-Z0-9-]+$/),
+        githubUsername: z.string().min(2).max(39).regex(/^[a-zA-Z0-9][a-zA-Z0-9.-]{0,37}[a-zA-Z0-9]$/),
         githubToken: z.string().optional(),
       });
 
       const parsed = importSchema.safeParse(req.body);
       if (!parsed.success) {
-        return sendError(res, 400, "githubUsername is required (1–39 alphanumeric/hyphen chars)");
+        return sendError(res, 400, "githubUsername is required (2–39 chars: alphanumeric, hyphens, or dots; must start and end with alphanumeric)");
       }
 
       const { githubUsername, githubToken } = parsed.data;
@@ -2112,10 +2119,17 @@ All errors return JSON with an \`error\` field and optional \`code\`:
   const updateAssetsSchema = z.object({
     assets: z
       .array(
-        z.object({
-          code: z.string().regex(/^[A-Z]{1,12}$/),
-          issuer: z.string().optional(),
-        }),
+        z
+          .object({
+            code: z.string().regex(/^[A-Z]{1,12}$/),
+            issuer: z.string().optional(),
+          })
+          .refine(
+            (asset) =>
+              asset.code === "XLM" ||
+              (typeof asset.issuer === "string" && asset.issuer.trim().length > 0),
+            { message: "issuer is required for non-XLM assets" },
+          ),
       )
       .min(1),
   });

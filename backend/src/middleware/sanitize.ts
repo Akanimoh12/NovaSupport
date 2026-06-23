@@ -172,12 +172,12 @@ function sanitizeSocialHandle(platform: string, handle: string): SanitizationRes
       break;
       
     case "githubHandle":
-      // GitHub handles: 1-39 characters, alphanumeric + hyphens, can't start/end with hyphen
-      if (!/^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$/.test(result)) {
-        violations.push("GitHub handle must be 1-39 characters, letters, numbers, hyphens (not at start/end)");
-        result = result.replace(/[^a-zA-Z0-9-]/g, "").slice(0, 39);
-        // Remove leading/trailing hyphens
-        result = result.replace(/^-+|-+$/g, "");
+      // GitHub handles: 1-39 characters, alphanumeric + hyphens + dots, can't start/end with hyphen or dot
+      if (!/^[a-zA-Z0-9]([a-zA-Z0-9.-]{0,37}[a-zA-Z0-9])?$/.test(result)) {
+        violations.push("GitHub handle must be 1-39 characters, letters, numbers, hyphens, or dots (not at start/end)");
+        result = result.replace(/[^a-zA-Z0-9.-]/g, "").slice(0, 39);
+        // Remove leading/trailing hyphens or dots
+        result = result.replace(/^[-.]+|[-.]+$/g, "");
       }
       break;
       

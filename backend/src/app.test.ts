@@ -1347,6 +1347,131 @@ async function main() {
     }
   });
 
+  // ── Issue #605: GitHub usernames with dots ────────────────────────────
+
+  // Test 48a: githubUsername with dot should pass regex validation (not return 400)
+  await runTest("POST /profiles/import/github → dotted username (user.name) passes regex validation", async () => {
+    const srv = await startTestServer(makeLogStream().stream);
+    try {
+      const token = signJWT(walletAddress, "fake-user-id");
+      const res = await fetch(`${srv.baseUrl}/profiles/someuser/import/github`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ githubUsername: "user.name" }),
+      });
+      // Validation passes → gets past regex → should NOT be 400 (will be 404 with DB, or non-400 without)
+      assert.notEqual(res.status, 400, `Dotted username should pass regex, but got 400`);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  // Test 48b: githubUsername starting or ending with a dot is still rejected
+  await runTest("POST /profiles/import/github → 400 when githubUsername starts with dot", async () => {
+    const srv = await startTestServer(makeLogStream().stream);
+    try {
+      const token = signJWT(walletAddress, "fake-user-id");
+      const res = await fetch(`${srv.baseUrl}/profiles/someuser/import/github`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ githubUsername: ".leading" }),
+      });
+      assert.equal(res.status, 400, `Expected 400 for username starting with dot, got ${res.status}`);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  // Test 48c: githubUsername ending with a dot is still rejected
+  await runTest("POST /profiles/import/github → 400 when githubUsername ends with dot", async () => {
+    const srv = await startTestServer(makeLogStream().stream);
+    try {
+      const token = signJWT(walletAddress, "fake-user-id");
+      const res = await fetch(`${srv.baseUrl}/profiles/someuser/import/github`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ githubUsername: "trailing." }),
+      });
+      assert.equal(res.status, 400, `Expected 400 for username ending with dot, got ${res.status}`);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  // ── Issue #610: Non-XLM asset issuer validation ───────────────────────
+
+  // Test 48d: PATCH /profiles/:username/assets → 422 when non-XLM asset is missing issuer
+  await runTest("PATCH /profiles/:username/assets → 422 when non-XLM asset has no issuer", async () => {
+    const srv = await startTestServer(makeLogStream().stream);
+    try {
+      const token = signJWT(walletAddress, "fake-user-id");
+      const res = await fetch(`${srv.baseUrl}/profiles/anyuser/assets`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ assets: [{ code: "USDC" }] }),
+      });
+      assert.equal(res.status, 422, `Expected 422 for USDC without issuer, got ${res.status}`);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  // Test 48e: PATCH /profiles/:username/assets → XLM without issuer is still accepted by validation
+  await runTest("PATCH /profiles/:username/assets → XLM without issuer passes schema validation", async () => {
+    const srv = await startTestServer(makeLogStream().stream);
+    try {
+      const token = signJWT(walletAddress, "fake-user-id");
+      const res = await fetch(`${srv.baseUrl}/profiles/anyuser/assets`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ assets: [{ code: "XLM" }] }),
+      });
+      // Validation passes for XLM → not 422; subsequent steps (auth/DB) may differ
+      assert.notEqual(res.status, 422, `XLM without issuer should pass schema validation but got 422`);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  // Test 48f: POST /profiles → 400 when a non-XLM accepted asset is missing its issuer
+  await runTest("POST /profiles → 400 when non-XLM acceptedAsset is missing issuer", async () => {
+    const srv = await startTestServer(makeLogStream().stream);
+    try {
+      const token = signJWT(walletAddress, "fake-user-id");
+      const res = await fetch(`${srv.baseUrl}/profiles`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          username: "testuser",
+          displayName: "Test",
+          walletAddress,
+          acceptedAssets: [{ code: "USDC" }],
+        }),
+      });
+      assert.equal(res.status, 400, `Expected 400 for USDC without issuer, got ${res.status}`);
+    } finally {
+      await srv.close();
+    }
+  });
+
   if (hasDb) {
     // Test 49: POST /profiles/import/github → 404 when NovaSupport profile not found
     await runTest("POST /profiles/import/github → 404 when profile not found", async () => {
