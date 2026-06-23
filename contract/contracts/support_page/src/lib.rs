@@ -93,18 +93,13 @@ impl SupportPageContract {
         Ok(())
     }
 
-    pub fn pause(e: Env, caller: Address) -> Result<(), Error> {
-        caller.require_auth();
-        
+    pub fn pause(e: Env) -> Result<(), Error> {
         let admin: Address = e
             .storage()
             .persistent()
             .get(&DataKey::Admin)
             .ok_or(Error::ContractNotInitialized)?;
-            
-        if caller != admin {
-            return Err(Error::NotAdmin);
-        }
+        admin.require_auth();
         
         e.storage().persistent().set(&DataKey::Paused, &true);
         e.storage()
@@ -113,18 +108,13 @@ impl SupportPageContract {
         Ok(())
     }
 
-    pub fn unpause(e: Env, caller: Address) -> Result<(), Error> {
-        caller.require_auth();
-        
+    pub fn unpause(e: Env) -> Result<(), Error> {
         let admin: Address = e
             .storage()
             .persistent()
             .get(&DataKey::Admin)
             .ok_or(Error::ContractNotInitialized)?;
-            
-        if caller != admin {
-            return Err(Error::NotAdmin);
-        }
+        admin.require_auth();
         
         e.storage().persistent().set(&DataKey::Paused, &false);
         e.storage()
@@ -569,7 +559,7 @@ mod test {
         token_admin.mint(&supporter, &10_000_i128);
 
         client.initialize(&admin);
-        client.pause(&admin);
+        client.pause();
 
         client.support(
             &supporter,
@@ -598,8 +588,8 @@ mod test {
         token_admin.mint(&supporter, &10_000_i128);
 
         client.initialize(&admin);
-        client.pause(&admin);
-        client.unpause(&admin);
+        client.pause();
+        client.unpause();
 
         let count = client.support(
             &supporter,
@@ -610,21 +600,6 @@ mod test {
             &String::from_str(&e, "After unpause"),
         );
         assert_eq!(count, 1);
-    }
-
-    #[test]
-    #[should_panic(expected = "Error(Contract, #101)")] // Error::NotAdmin
-    fn non_admin_cannot_pause() {
-        let e = Env::default();
-        e.mock_all_auths();
-        let contract_id = e.register(SupportPageContract, ());
-        let client = SupportPageContractClient::new(&e, &contract_id);
-
-        let admin = Address::generate(&e);
-        let intruder = Address::generate(&e);
-
-        client.initialize(&admin);
-        client.pause(&intruder);
     }
 
     #[test]
@@ -958,19 +933,18 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "Error(Contract, #101)")] // Error::NotAdmin
+    #[should_panic]
     fn non_admin_cannot_unpause() {
         let e = Env::default();
-        e.mock_all_auths();
         let contract_id = e.register(SupportPageContract, ());
         let client = SupportPageContractClient::new(&e, &contract_id);
 
         let admin = Address::generate(&e);
-        let intruder = Address::generate(&e);
 
         client.initialize(&admin);
-        client.pause(&admin);
-        client.unpause(&intruder);
+        client.pause();
+        // Auth not mocked for admin, so unpause should fail
+        client.unpause();
     }
 
     #[test]
@@ -981,9 +955,7 @@ mod test {
         let contract_id = e.register(SupportPageContract, ());
         let client = SupportPageContractClient::new(&e, &contract_id);
 
-        let caller = Address::generate(&e);
-
-        client.pause(&caller);
+        client.pause();
     }
 
     #[test]

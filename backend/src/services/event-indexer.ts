@@ -18,6 +18,7 @@
 
 import type { PrismaClient } from "@prisma/client";
 import { logger } from "../logger.js";
+import { Metrics } from "../metrics.js";
 
 export interface SupportEventRecord {
   /** Stellar tx hash of the transaction that emitted the event. */
@@ -245,6 +246,7 @@ export class EventIndexer {
       logger.info({ resolved }, "resolved orphaned transactions to profiles");
     }
 
+    Metrics.orphanCount(orphans.length - resolved);
     return resolved;
   }
 
@@ -318,17 +320,21 @@ export class EventIndexer {
     try {
       const { ingested, nextCursor } = await this.pollOnce();
       if (ingested > 0) {
+        Metrics.eventsIngested(ingested);
+        Metrics.eventIndexerLastSuccess(Date.now());
         logger.info(
           { ingested, contractId: this.contractId },
           "indexed events",
         );
         await this.resolveOrphans().catch((err) => {
+          Metrics.eventIndexerErrors();
           logger.warn({ err }, "orphan resolution failed — will retry next tick");
         });
         // More pages available — re-enter immediately but yield to the event loop.
         if (nextCursor !== null) delay = 0;
       }
     } catch (err) {
+      Metrics.eventIndexerErrors();
       logger.error({ err }, "event indexer tick failed");
     } finally {
       this.scheduleNextTick(delay);

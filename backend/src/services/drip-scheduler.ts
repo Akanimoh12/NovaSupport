@@ -1,11 +1,12 @@
 import crypto from "crypto";
 import { prisma } from "../db.js";
 import { logger } from "../logger.js";
+import { Metrics } from "../metrics.js";
 
-export async function processDueRecurringSupports() {
+export async function processDueRecurringSupports(prismaClient = prisma) {
   const now = new Date();
   
-  const dueSupports = await prisma.recurringSupport.findMany({
+  const dueSupports = await prismaClient.recurringSupport.findMany({
     where: {
       status: "active",
       nextRunAt: { lte: now },
@@ -27,7 +28,7 @@ export async function processDueRecurringSupports() {
         nextRunAt.setDate(nextRunAt.getDate() + 30);
       }
 
-      await prisma.$transaction(async (tx: any) => {
+      await prismaClient.$transaction(async (tx: any) => {
         // Create the pending SupportTransaction
         const txHash = `pending_${crypto.randomUUID()}`;
         
@@ -58,12 +59,14 @@ export async function processDueRecurringSupports() {
         profileId: support.profileId,
         amount: support.amount.toString(),
       }, "Processed due recurring support");
+      Metrics.dripsProcessed();
 
     } catch (error) {
       logger.error({
         err: error,
         dripId: support.id,
       }, "Failed to process recurring support");
+      Metrics.dripErrors();
     }
   }
 }

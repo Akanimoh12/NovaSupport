@@ -1,4 +1,5 @@
 import { logger } from "../logger.js";
+import { Metrics } from "../metrics.js";
 
 type State = "CLOSED" | "OPEN" | "HALF_OPEN";
 
@@ -12,12 +13,14 @@ export class CircuitBreaker {
   constructor(failureThreshold = 5, resetTimeout = 30000) {
     this.failureThreshold = failureThreshold;
     this.resetTimeout = resetTimeout;
+    Metrics.circuitBreakerState("CLOSED");
   }
 
   async execute<T>(fn: () => Promise<T>): Promise<T> {
     if (this.state === "OPEN") {
       if (Date.now() >= this.nextAttempt) {
         this.state = "HALF_OPEN";
+        Metrics.circuitBreakerState("HALF_OPEN");
         logger.info("Circuit breaker state: HALF_OPEN");
       } else {
         throw new Error("Circuit breaker is OPEN");
@@ -38,6 +41,7 @@ export class CircuitBreaker {
     this.failureCount = 0;
     if (this.state === "HALF_OPEN") {
       this.state = "CLOSED";
+      Metrics.circuitBreakerState("CLOSED");
       logger.info("Circuit breaker state: CLOSED");
     }
   }
@@ -47,6 +51,7 @@ export class CircuitBreaker {
     if (this.state === "HALF_OPEN" || this.failureCount >= this.failureThreshold) {
       this.state = "OPEN";
       this.nextAttempt = Date.now() + this.resetTimeout;
+      Metrics.circuitBreakerState("OPEN");
       logger.warn(
         { failureCount: this.failureCount, nextAttempt: new Date(this.nextAttempt).toISOString() },
         "Circuit breaker state: OPEN"

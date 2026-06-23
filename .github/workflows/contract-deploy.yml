@@ -1,12 +1,6 @@
 name: Contract Deploy
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "contract/**"
-      - ".github/workflows/contract-deploy.yml"
   workflow_dispatch:
     inputs:
       network:

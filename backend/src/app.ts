@@ -45,6 +45,7 @@ import {
   type ExpectedTxDetails,
 } from "./services/verify-transaction.js";
 import { checkAndAwardBadges } from "./services/badge-awarder.js";
+import { getMetricsText } from "./metrics.js";
 
 // Extend Express Request to include auth context
 declare global {
@@ -623,6 +624,12 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       timestamp: new Date().toISOString(),
       checks,
     });
+  });
+
+  // ── Prometheus-compatible metrics endpoint ────────────────────────────
+  v1Router.get("/metrics", (_req, res) => {
+    res.set("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+    res.send(getMetricsText());
   });
 
   // ── Authentication ─────────────────────────────────────────────────────

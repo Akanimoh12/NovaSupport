@@ -1,6 +1,7 @@
 import { prisma } from "../db.js";
 import { logger } from "../logger.js";
 import { deliverWebhook, shouldRetry, getNextRetryDelay } from "./webhook.js";
+import { Metrics } from "../metrics.js";
 
 const MAX_DELIVERY_ATTEMPTS = 3;
 
@@ -36,6 +37,7 @@ export async function processPendingWebhookDeliveries() {
         { deliveryId: delivery.id, webhookId: delivery.webhookId, statusCode: result.statusCode },
         "Webhook delivered successfully",
       );
+      Metrics.webhooksDelivered();
     } else {
       const nextAttempt = delivery.attemptCount + 1;
       const willRetry = result.willRetry && shouldRetry(nextAttempt);
@@ -68,6 +70,10 @@ export async function processPendingWebhookDeliveries() {
         },
         willRetry ? "Webhook delivery failed, scheduled retry" : "Webhook delivery failed permanently"
       );
+      if (willRetry) {
+        Metrics.webhookRetries();
+      }
+      Metrics.webhookDeliveryErrors();
     }
   }
 }
