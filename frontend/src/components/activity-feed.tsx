@@ -8,6 +8,7 @@ import {
   RefreshCw,
   ChevronDown,
   Loader2,
+  AlertTriangle,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
@@ -77,6 +78,7 @@ export function ActivityFeed({ username, limit = 10 }: ActivityFeedProps) {
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [milestonesUnavailable, setMilestonesUnavailable] = useState(false);
   const [displayedItems, setDisplayedItems] = useState(limit);
   const [hasMore, setHasMore] = useState(false);
 
@@ -88,6 +90,7 @@ export function ActivityFeed({ username, limit = 10 }: ActivityFeedProps) {
     try {
       setLoading(true);
       setError(null);
+      setMilestonesUnavailable(false);
 
       const [transactionsRes, milestonesRes] = await Promise.all([
         fetch(`${API_BASE_URL}/profiles/${username}/transactions?limit=100`),
@@ -97,8 +100,13 @@ export function ActivityFeed({ username, limit = 10 }: ActivityFeedProps) {
       const transactionsData = transactionsRes.ok
         ? await transactionsRes.json()
         : { transactions: [] };
-      const milestonesData = milestonesRes?.ok
-        ? await milestonesRes.json()
+
+      const milestonesOk = milestonesRes?.ok === true;
+      if (!milestonesOk) {
+        setMilestonesUnavailable(true);
+      }
+      const milestonesData = milestonesOk
+        ? await milestonesRes!.json()
         : { milestones: [] };
 
       const items: ActivityItem[] = [];
@@ -181,88 +189,102 @@ export function ActivityFeed({ username, limit = 10 }: ActivityFeedProps) {
     );
   }
 
-  if (activities.length === 0) {
-    return (
-      <div className="text-center py-12">
-        <TrendingUp className="h-12 w-12 text-white/20 mx-auto mb-4" />
-        <p className="text-white/50">No activity yet</p>
-      </div>
-    );
-  }
-
   const visibleActivities = activities.slice(0, displayedItems);
   const remainingCount = Math.max(0, activities.length - displayedItems);
 
   return (
     <div className="space-y-3">
-      <AnimatePresence>
-        {visibleActivities.map((activity, index) => (
-          <motion.div
-            key={activity.id}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ delay: index * 0.05 }}
-            className="group relative rounded-xl border border-white/10 bg-white/5 p-4 transition hover:bg-white/10 hover:border-white/20"
+      {/* Partial-failure notice: milestones API failed but transactions loaded */}
+      {milestonesUnavailable && (
+        <div className="flex items-center gap-2 rounded-lg border border-yellow-500/20 bg-yellow-500/10 px-4 py-2 text-sm text-yellow-400">
+          <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+          <span>Milestone data could not be loaded — the feed may be incomplete.</span>
+          <button
+            onClick={fetchActivities}
+            className="ml-auto flex-shrink-0 text-xs underline underline-offset-2 hover:text-yellow-300 transition"
           >
-            <div className="flex gap-4">
-              {/* Icon */}
-              <div className="flex-shrink-0 flex items-center justify-center h-10 w-10 rounded-full bg-white/5">
-                {activity.icon}
-              </div>
+            Retry
+          </button>
+        </div>
+      )}
 
-              {/* Content */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-start justify-between gap-2 mb-1">
-                  <h3 className="font-semibold text-white text-sm truncate">
-                    {activity.title}
-                  </h3>
-                  <span className="flex-shrink-0 text-xs text-white/50 whitespace-nowrap">
-                    {formatDate(activity.timestamp)}
-                  </span>
-                </div>
+      {activities.length === 0 ? (
+        <div className="text-center py-12">
+          <TrendingUp className="h-12 w-12 text-white/20 mx-auto mb-4" />
+          <p className="text-white/50">No activity yet</p>
+        </div>
+      ) : (
+        <>
+          <AnimatePresence>
+            {visibleActivities.map((activity, index) => (
+              <motion.div
+                key={activity.id}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ delay: index * 0.05 }}
+                className="group relative rounded-xl border border-white/10 bg-white/5 p-4 transition hover:bg-white/10 hover:border-white/20"
+              >
+                <div className="flex gap-4">
+                  {/* Icon */}
+                  <div className="flex-shrink-0 flex items-center justify-center h-10 w-10 rounded-full bg-white/5">
+                    {activity.icon}
+                  </div>
 
-                <p className="text-xs text-white/60 mb-3">{activity.description}</p>
-
-                {/* Metadata */}
-                {activity.metadata && (
-                  <div className="flex flex-wrap gap-2">
-                    {activity.metadata.amount && (
-                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-mint/10 text-xs text-mint font-mono">
-                        {activity.metadata.amount} {activity.metadata.assetCode}
+                  {/* Content */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <h3 className="font-semibold text-white text-sm truncate">
+                        {activity.title}
+                      </h3>
+                      <span className="flex-shrink-0 text-xs text-white/50 whitespace-nowrap">
+                        {formatDate(activity.timestamp)}
                       </span>
-                    )}
-                    {activity.metadata.txHash && (
-                      <Link
-                        href={`https://stellar.expert/explorer/testnet/tx/${activity.metadata.txHash}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 text-xs text-white/70 hover:text-white/90 transition font-mono"
-                      >
-                        {truncateHash(activity.metadata.txHash)}
-                        <span>↗</span>
-                      </Link>
+                    </div>
+
+                    <p className="text-xs text-white/60 mb-3">{activity.description}</p>
+
+                    {/* Metadata */}
+                    {activity.metadata && (
+                      <div className="flex flex-wrap gap-2">
+                        {activity.metadata.amount && (
+                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-mint/10 text-xs text-mint font-mono">
+                            {activity.metadata.amount} {activity.metadata.assetCode}
+                          </span>
+                        )}
+                        {activity.metadata.txHash && (
+                          <Link
+                            href={`https://stellar.expert/explorer/testnet/tx/${activity.metadata.txHash}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 text-xs text-white/70 hover:text-white/90 transition font-mono"
+                          >
+                            {truncateHash(activity.metadata.txHash)}
+                            <span>↗</span>
+                          </Link>
+                        )}
+                      </div>
                     )}
                   </div>
-                )}
-              </div>
-            </div>
-          </motion.div>
-        ))}
-      </AnimatePresence>
+                </div>
+              </motion.div>
+            ))}
+          </AnimatePresence>
 
-      {/* Load more button */}
-      {remainingCount > 0 && (
-        <motion.button
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          onClick={() => setDisplayedItems((prev) => prev + limit)}
-          className="w-full mt-4 py-3 rounded-lg border border-white/10 bg-white/5 text-sm font-medium text-white transition hover:bg-white/10 hover:border-white/20 flex items-center justify-center gap-2"
-        >
-          Load more
-          <ChevronDown size={16} />
-          <span className="text-xs text-white/60">({remainingCount} more)</span>
-        </motion.button>
+          {/* Load more button */}
+          {remainingCount > 0 && (
+            <motion.button
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              onClick={() => setDisplayedItems((prev) => prev + limit)}
+              className="w-full mt-4 py-3 rounded-lg border border-white/10 bg-white/5 text-sm font-medium text-white transition hover:bg-white/10 hover:border-white/20 flex items-center justify-center gap-2"
+            >
+              Load more
+              <ChevronDown size={16} />
+              <span className="text-xs text-white/60">({remainingCount} more)</span>
+            </motion.button>
+          )}
+        </>
       )}
     </div>
   );

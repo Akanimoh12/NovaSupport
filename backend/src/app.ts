@@ -2959,10 +2959,17 @@ All errors return JSON with an \`error\` field and optional \`code\`:
         assetIssuer: parsed.data.assetIssuer,
       };
 
-      const verification =
-        process.env.SKIP_HORIZON_VALIDATION === "true"
-          ? true
-          : await verifyTransaction(parsed.data.txHash, 3, 1000, req, expectedDetails);
+      const skipHorizonValidation = process.env.SKIP_HORIZON_VALIDATION === "true";
+      if (skipHorizonValidation) {
+        req.log.warn(
+          { txHash: parsed.data.txHash },
+          "SKIP_HORIZON_VALIDATION is enabled — transaction verification bypassed",
+        );
+      }
+
+      const verification = skipHorizonValidation
+        ? true
+        : await verifyTransaction(parsed.data.txHash, 3, 1000, req, expectedDetails);
 
       if (verification === false) {
         return res

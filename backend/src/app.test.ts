@@ -1172,6 +1172,55 @@ async function main() {
     }
   });
 
+  // ── Issue #604: SKIP_HORIZON_VALIDATION warn log ─────────────────────
+
+  // Test 42a: SKIP_HORIZON_VALIDATION=true logs a WARN at each bypass
+  await runTest("POST /support-transactions → WARN logged when SKIP_HORIZON_VALIDATION=true", async () => {
+    const { stream, getOutput } = makeLogStream();
+    const srv = await startTestServer(stream);
+    const prev = process.env.SKIP_HORIZON_VALIDATION;
+    process.env.SKIP_HORIZON_VALIDATION = "true";
+
+    try {
+      const token = signJWT(walletAddress, "fake-user-id");
+      // Send a well-formed request so it passes validation and reaches the bypass check.
+      // Without a DB the request will ultimately fail, but the WARN is emitted first.
+      await fetch(`${srv.baseUrl}/support-transactions`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          txHash: `skip-test-${randomUUID()}`,
+          amount: "1.0000000",
+          assetCode: "XLM",
+          recipientAddress: walletAddress,
+          profileId: "fake-profile-id",
+          stellarNetwork: "TESTNET",
+        }),
+      });
+
+      await new Promise((r) => setImmediate(r));
+
+      const lines = parseLogLines(getOutput());
+      const warnEntry = lines.find(
+        (l) =>
+          l.level === 40 &&
+          typeof l.msg === "string" &&
+          (l.msg as string).includes("SKIP_HORIZON_VALIDATION is enabled"),
+      );
+      assert.ok(
+        warnEntry !== undefined,
+        `Expected a WARN log for SKIP_HORIZON_VALIDATION bypass. Got:\n${getOutput()}`,
+      );
+    } finally {
+      await srv.close();
+      if (prev === undefined) delete process.env.SKIP_HORIZON_VALIDATION;
+      else process.env.SKIP_HORIZON_VALIDATION = prev;
+    }
+  });
+
   // ── Issue #447: Leaderboard caching ──────────────────────────────────
   if (hasDb) {
     // Test 43: GET /profiles/:username/leaderboard → returns correct structure

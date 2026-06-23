@@ -91,6 +91,12 @@ if (startupConfig.horizonUrl.includes("testnet")) {
   );
 }
 
+if (process.env.SKIP_HORIZON_VALIDATION === "true") {
+  logger.warn(
+    "SKIP_HORIZON_VALIDATION is enabled — transaction verification bypassed",
+  );
+}
+
 import { app } from "./app.js";
 import { startDripScheduler } from "./services/drip-scheduler.js";
 import { startWebhookProcessor } from "./services/webhook-processor.js";

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll } from "vitest";
-import { render } from "@testing-library/react";
+import { render, waitFor } from "@testing-library/react";
 import { ThemeToggle } from "../theme-toggle";
 import { MilestoneCard } from "../milestone-card";
 import { EmbedWidget } from "../embed-widget";
@@ -20,6 +20,7 @@ vi.mock("lucide-react", () => ({
   RefreshCw: () => <span>RefreshCw</span>,
   ChevronDown: () => <span>ChevronDown</span>,
   Loader2: () => <span>Loader2</span>,
+  AlertTriangle: () => <span>AlertTriangle</span>,
   Trophy: () => <span>Trophy</span>,
   Target: () => <span>Target</span>,
   Sparkles: () => <span>Sparkles</span>,
@@ -142,5 +143,27 @@ describe("Additional Component Snapshots", () => {
   it("NotificationPreferences matches snapshot (no auth token)", () => {
     const { container } = render(<NotificationPreferences username="johndoe" />);
     expect(container).toMatchSnapshot();
+  });
+
+  // Issue #597: milestones fetch failure shows a partial-failure notice
+  it("ActivityFeed shows partial-failure notice when milestones fetch fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ transactions: [] }),
+        } as unknown as Response)
+        .mockRejectedValueOnce(new Error("Network error")),
+    );
+
+    const { container } = render(<ActivityFeed username="johndoe" limit={5} />);
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("Milestone data could not be loaded");
+    });
+
+    // Restore the original never-resolving mock for subsequent tests
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => {})));
   });
 });
