@@ -171,21 +171,29 @@ model WebhookDelivery {
 
   @@index([webhookId])
   @@index([status, nextRetryAt])
+  // #609: A partial index covering only status = 'pending' rows is created via
+  // a raw migration (20260623010000) because Prisma's DSL does not support
+  // partial indexes. That index keeps the webhook processor query fast as
+  // completed/failed history accumulates.
 }
 
 model RecurringSupport {
-  id          String   @id @default(cuid())
-  supporterId String
+  id          String    @id @default(cuid())
+  supporterId String?
   profileId   String
-  amount      Decimal  @db.Decimal(18, 7)
-  assetCode   String   @default("XLM")
+  amount      Decimal   @db.Decimal(18, 7)
+  assetCode   String    @default("XLM")
   frequency   String
-  nextRunAt   DateTime @default(now())
-  status      String   @default("active")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  supporter   User     @relation("RecurringSupporters", fields: [supporterId], references: [id], onDelete: Cascade)
-  profile     Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  nextRunAt   DateTime  @default(now())
+  status      String    @default("active")
+  cancelledAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  // #608: onDelete: SetNull preserves subscription history when the supporter's
+  // User row is deleted. supporterId becomes NULL; the drip-scheduler detects
+  // this on its next run and writes status = 'cancelled' + cancelledAt.
+  supporter   User?     @relation("RecurringSupporters", fields: [supporterId], references: [id], onDelete: SetNull)
+  profile     Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@index([supporterId])
   @@index([profileId])

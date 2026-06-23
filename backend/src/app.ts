@@ -3874,12 +3874,13 @@ All errors return JSON with an \`error\` field and optional \`code\`:
 
       return res.json(subscriptions.map((s) => ({
         id: s.id,
-        supporterAddress: s.supporter.email,
+        supporterAddress: s.supporter?.email ?? null,
         amount: s.amount.toString(),
         assetCode: s.assetCode,
         frequency: s.frequency,
         nextRunAt: s.nextRunAt,
         status: s.status,
+        cancelledAt: s.cancelledAt,
         createdAt: s.createdAt,
       })));
     }
