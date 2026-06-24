@@ -1,6 +1,26 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CircuitBreaker } from "./circuit-breaker.js";
+import { CircuitBreaker, type CircuitBreakerSnapshot, type CircuitBreakerStorage } from "./circuit-breaker.js";
+
+function memoryStorage(initial: CircuitBreakerSnapshot | null = null): {
+  storage: CircuitBreakerStorage;
+  snapshots: CircuitBreakerSnapshot[];
+} {
+  let current = initial;
+  const snapshots: CircuitBreakerSnapshot[] = [];
+  return {
+    snapshots,
+    storage: {
+      async load() {
+        return current;
+      },
+      async save(snapshot) {
+        current = { ...snapshot };
+        snapshots.push({ ...snapshot });
+      },
+    },
+  };
+}
 
 test("CircuitBreaker starts in CLOSED state", () => {
   const cb = new CircuitBreaker();
@@ -175,7 +195,6 @@ test("CircuitBreaker respects custom failure threshold and timeout", async () =>
   }
 
   assert.equal(cb.getState(), "OPEN");
-  (cb as unknown as { failureThreshold: number }).failureThreshold;
   assert.equal(
     (cb as unknown as { failureThreshold: number }).failureThreshold,
     THRESHOLD,
@@ -216,4 +235,41 @@ test("CircuitBreaker re-throws the original error from the function", async () =
       return true;
     },
   );
+});
+
+test("CircuitBreaker persists OPEN state after threshold failures", async () => {
+  const { storage, snapshots } = memoryStorage();
+  const cb = new CircuitBreaker(1, 99999, storage);
+
+  await assert.rejects(
+    cb.execute(async () => {
+      throw new Error("upstream down");
+    }),
+  );
+
+  assert.equal(cb.getState(), "OPEN");
+  assert.equal(snapshots.at(-1)?.state, "OPEN");
+  assert.equal(snapshots.at(-1)?.failureCount, 1);
+  assert.ok((snapshots.at(-1)?.nextAttempt ?? 0) > Date.now());
+});
+
+test("CircuitBreaker restores persisted OPEN state and blocks calls before reset", async () => {
+  const { storage } = memoryStorage({
+    state: "OPEN",
+    failureCount: 5,
+    nextAttempt: Date.now() + 99999,
+  });
+  const cb = new CircuitBreaker(5, 30000, storage);
+  let executed = false;
+
+  await assert.rejects(
+    cb.execute(async () => {
+      executed = true;
+      return "should not run";
+    }),
+    /Circuit breaker is OPEN/,
+  );
+
+  assert.equal(executed, false);
+  assert.equal(cb.getState(), "OPEN");
 });

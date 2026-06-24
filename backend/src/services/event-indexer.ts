@@ -94,6 +94,7 @@ export class EventIndexer {
   private readonly maxPagesPerTick: number;
   private stopped = false;
   private timer: NodeJS.Timeout | null = null;
+  private currentTick: Promise<void> | null = null;
 
   constructor(options: EventIndexerOptions) {
     this.prisma = options.prisma;
@@ -110,11 +111,14 @@ export class EventIndexer {
     this.scheduleNextTick(0);
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     this.stopped = true;
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
+    }
+    if (this.currentTick) {
+      await this.currentTick;
     }
   }
 
@@ -305,9 +309,14 @@ export class EventIndexer {
   private scheduleNextTick(delayMs: number): void {
     if (this.stopped) return;
     this.timer = setTimeout(() => {
-      this.tick().catch((err) => {
-        logger.error({ err }, "event indexer tick failed");
-      });
+      this.timer = null;
+      this.currentTick = this.tick()
+        .catch((err) => {
+          logger.error({ err }, "event indexer tick failed");
+        })
+        .finally(() => {
+          this.currentTick = null;
+        });
     }, delayMs);
   }
 

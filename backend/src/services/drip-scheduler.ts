@@ -22,7 +22,7 @@ export async function processDueRecurringSupports(prismaClient = prisma) {
     // Mark the subscription cancelled so it stops appearing as due and so
     // the profile owner can see the cancellation in their dashboard.
     if (!support.supporter) {
-      await prisma.recurringSupport.update({
+      await prismaClient.recurringSupport.update({
         where: { id: support.id },
         data: { status: "cancelled", cancelledAt: new Date() },
       });
@@ -84,22 +84,54 @@ export async function processDueRecurringSupports(prismaClient = prisma) {
   }
 }
 
-export function startDripScheduler() {
+export type SchedulerHandle = {
+  stop(): Promise<void>;
+};
+
+let dripInterval: ReturnType<typeof setInterval> | null = null;
+let dripInFlight: Promise<void> | null = null;
+let dripStopped = true;
+
+function runDripSchedulerTick(): void {
+  dripInFlight = processDueRecurringSupports()
+    .catch((err) => {
+      logger.error({ err }, "Error in processDueRecurringSupports run");
+    })
+    .finally(() => {
+      dripInFlight = null;
+    });
+}
+
+export function startDripScheduler(): SchedulerHandle {
   if (process.env.DRIP_SCHEDULER_ENABLED === "true") {
     logger.info("Drip scheduler enabled. Starting...");
+    dripStopped = false;
     
     // Initial run
-    processDueRecurringSupports().catch((err) => {
-      logger.error({ err }, "Error in initial processDueRecurringSupports run");
-    });
+    runDripSchedulerTick();
     
     // Then every 60 seconds
-    setInterval(() => {
-      processDueRecurringSupports().catch((err) => {
-        logger.error({ err }, "Error in processDueRecurringSupports interval");
-      });
+    dripInterval = setInterval(() => {
+      if (!dripInFlight) {
+        runDripSchedulerTick();
+      }
     }, 60000);
   } else {
     logger.info("Drip scheduler disabled.");
   }
+
+  return {
+    async stop() {
+      if (dripStopped) return;
+      dripStopped = true;
+      if (dripInterval) {
+        clearInterval(dripInterval);
+        dripInterval = null;
+      }
+      if (dripInFlight) {
+        await dripInFlight;
+      }
+      logger.info("Drip scheduler stopped.");
+    },
+  };
 }

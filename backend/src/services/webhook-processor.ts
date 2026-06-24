@@ -83,14 +83,48 @@ export async function processPendingWebhookDeliveries() {
   }
 }
 
-export function startWebhookProcessor() {
+export type WebhookProcessorHandle = {
+  stop(): Promise<void>;
+};
+
+let processorInterval: ReturnType<typeof setInterval> | null = null;
+let processorInFlight: Promise<void> | null = null;
+let processorStopped = true;
+
+function runWebhookProcessorTick(): void {
+  processorInFlight = processPendingWebhookDeliveries()
+    .catch((err) => {
+      logger.error({ err }, "Error in webhook processor run");
+    })
+    .finally(() => {
+      processorInFlight = null;
+    });
+}
+
+export function startWebhookProcessor(): WebhookProcessorHandle {
   const interval = Number(process.env.WEBHOOK_PROCESSOR_INTERVAL_MS ?? 10000);
 
   logger.info({ interval }, "Starting webhook processor...");
+  processorStopped = false;
 
-  setInterval(() => {
-    processPendingWebhookDeliveries().catch((err) => {
-      logger.error({ err }, "Error in webhook processor interval");
-    });
+  processorInterval = setInterval(() => {
+    if (!processorInFlight) {
+      runWebhookProcessorTick();
+    }
   }, interval);
+
+  return {
+    async stop() {
+      if (processorStopped) return;
+      processorStopped = true;
+      if (processorInterval) {
+        clearInterval(processorInterval);
+        processorInterval = null;
+      }
+      if (processorInFlight) {
+        await processorInFlight;
+      }
+      logger.info("Webhook processor stopped.");
+    },
+  };
 }

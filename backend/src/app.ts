@@ -36,7 +36,7 @@ import {
 } from "./services/profile-leaderboard-cache.js";
 import { processPendingWebhookDeliveries } from "./services/webhook-processor.js";
 import { sanitizeBody, sanitizeQuery } from "./middleware/sanitize.js";
-import { CircuitBreaker } from "./services/circuit-breaker.js";
+import { CircuitBreaker, type CircuitBreakerStorage, type State } from "./services/circuit-breaker.js";
 import {
   validateUsername,
   validateUsernameWithTakenCheck,
@@ -65,7 +65,45 @@ const MAX_FILE_SIZE = 2_097_152;
 const horizonUrl =
   process.env.HORIZON_URL ?? "https://horizon-testnet.stellar.org";
 const stellarServer = new Horizon.Server(horizonUrl);
-const horizonCircuitBreaker = new CircuitBreaker(5, 30000); // 5 failures, 30s reset
+function createPrismaCircuitBreakerStorage(name: string): CircuitBreakerStorage {
+  return {
+    async load() {
+      const row = await prisma.circuitBreakerState.findUnique({
+        where: { name },
+      });
+      if (!row) return null;
+      const state = ["CLOSED", "OPEN", "HALF_OPEN"].includes(row.state)
+        ? (row.state as State)
+        : "CLOSED";
+      return {
+        state,
+        failureCount: row.failureCount,
+        nextAttempt: row.nextAttemptAt ? row.nextAttemptAt.getTime() : 0,
+      };
+    },
+    async save(snapshot) {
+      await prisma.circuitBreakerState.upsert({
+        where: { name },
+        create: {
+          name,
+          state: snapshot.state,
+          failureCount: snapshot.failureCount,
+          nextAttemptAt: snapshot.nextAttempt ? new Date(snapshot.nextAttempt) : null,
+        },
+        update: {
+          state: snapshot.state,
+          failureCount: snapshot.failureCount,
+          nextAttemptAt: snapshot.nextAttempt ? new Date(snapshot.nextAttempt) : null,
+        },
+      });
+    },
+  };
+}
+const horizonCircuitBreaker = new CircuitBreaker(
+  5,
+  30000,
+  createPrismaCircuitBreakerStorage("horizon"),
+); // 5 failures, 30s reset
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -254,6 +292,20 @@ const paginationSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
   offset: z.coerce.number().int().min(0).default(0),
 });
+
+const profileSearchPaginationSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(10),
+});
+
+type OwnedProfile = {
+  ownerId: string;
+  walletAddress: string;
+};
+
+function isProfileOwner(auth: AuthContext | undefined, profile: OwnedProfile): boolean {
+  if (!auth) return false;
+  return auth.walletAddress === profile.walletAddress || auth.userId === profile.ownerId;
+}
 
 function sendError(
   res: Response,
@@ -1114,7 +1166,11 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       // Ensure pg_trgm extension is available
       await prisma.$executeRawUnsafe("CREATE EXTENSION IF NOT EXISTS pg_trgm");
 
-      const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+      const pagination = profileSearchPaginationSchema.safeParse(req.query);
+      if (!pagination.success) {
+        return sendError(res, 400, "Invalid pagination parameters", "INVALID_PAGINATION");
+      }
+      const { limit } = pagination.data;
 
       // Fuzzy search with relevance scoring using pg_trgm similarity
       const profiles = await prisma.$queryRawUnsafe<
@@ -1286,7 +1342,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       // Attempt to increment view count; viewCountLimiter will skip duplicate
       // IPs within the same hour window (applied as middleware below).
       // Skip increment if the viewer is the profile owner (#542).
-      const isOwner = req.auth?.userId && profile.ownerId === req.auth.userId;
+      const isOwner = isProfileOwner(req.auth, profile);
       if (!isOwner) {
         void prisma.profile.update({
           where: { id: profile.id },
@@ -1299,7 +1355,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       const responseBody: Record<string, unknown> = { ...profile };
       if (req.auth) {
         responseBody.isOwner = Boolean(
-          req.auth.userId && profile.ownerId === req.auth.userId,
+          isProfileOwner(req.auth, profile),
         );
       }
 
@@ -1795,7 +1851,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       }
 
       // Verify authenticated wallet owns the profile
-      if (!req.auth || req.auth.walletAddress !== profile.walletAddress) {
+      if (!isProfileOwner(req.auth, profile)) {
         return sendError(res, 403, "Forbidden: You do not own this profile");
       }
 
@@ -1935,7 +1991,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
         return sendError(res, 404, "Profile not found");
       }
 
-      if (!req.auth || req.auth.walletAddress !== profile.walletAddress) {
+      if (!isProfileOwner(req.auth, profile)) {
         return sendError(res, 403, "Forbidden: You do not own this profile");
       }
 
@@ -2002,7 +2058,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       }
 
       // Ensure the authenticated user owns this profile
-      if (!req.auth || req.auth.walletAddress !== profile.walletAddress) {
+      if (!isProfileOwner(req.auth, profile)) {
         return sendError(res, 403, "Forbidden: You do not own this profile");
       }
 
@@ -2036,8 +2092,6 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     resendLimiter,
     async (req, res) => {
       const username = req.params.username as string;
-      const userId = (req.auth!.userId || req.auth!.walletAddress) as string;
-
       try {
         const profile = await prisma.profile.findUnique({
           where: { username },
@@ -2048,7 +2102,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
           return sendError(res, 404, "Profile not found");
         }
 
-        if (profile.ownerId !== userId) {
+        if (!isProfileOwner(req.auth, profile)) {
           return sendError(res, 403, "Forbidden");
         }
 
@@ -2095,7 +2149,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     const profile = await prisma.profile.findUnique({ where: { username } });
     if (!profile) return sendError(res, 404, "Profile not found");
 
-    if (!req.auth || req.auth.walletAddress !== profile.walletAddress) {
+    if (!isProfileOwner(req.auth, profile)) {
       return sendError(res, 403, "Forbidden: You do not own this profile");
     }
 
@@ -2124,7 +2178,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     const profile = await prisma.profile.findUnique({ where: { username } });
     if (!profile) return sendError(res, 404, "Profile not found");
 
-    if (!req.auth || req.auth.walletAddress !== profile.walletAddress) {
+    if (!isProfileOwner(req.auth, profile)) {
       return sendError(res, 403, "Forbidden: You do not own this profile");
     }
 
@@ -2227,7 +2281,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
         return sendError(res, 404, "Profile not found");
       }
 
-      if (!req.auth || req.auth.walletAddress !== profile.walletAddress) {
+      if (!isProfileOwner(req.auth, profile)) {
         return sendError(res, 403, "Forbidden: You do not own this profile");
       }
 
@@ -2550,7 +2604,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       }
 
       // Verify the authenticated user owns this profile
-      if (!req.auth || req.auth.walletAddress !== profile.walletAddress) {
+      if (!isProfileOwner(req.auth, profile)) {
         return sendError(res, 403, "Forbidden: You do not own this profile");
       }
 
@@ -2655,7 +2709,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
   // Helper: resolve profile and verify owner
   async function resolveProfileOwner(
     username: string,
-    ownerId: string,
+    auth: AuthContext | undefined,
     res: Response,
   ) {
     const profile = await prisma.profile.findUnique({ where: { username } });
@@ -2663,7 +2717,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       sendError(res, 404, "Profile not found");
       return null;
     }
-    if (profile.ownerId !== ownerId) {
+    if (!isProfileOwner(auth, profile)) {
       sendError(res, 403, "Forbidden");
       return null;
     }
@@ -2674,7 +2728,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     const parsed = webhookCreateSchema.safeParse(req.body);
     if (!parsed.success) return sendError(res, 400, "Invalid URL — must be a valid HTTPS URL");
 
-    const profile = await resolveProfileOwner(req.params.username as string, (req.auth!.userId || req.auth!.walletAddress) as string, res);
+    const profile = await resolveProfileOwner(req.params.username as string, req.auth, res);
     if (!profile) return;
 
     const secret = randomBytes(32).toString("hex");
@@ -2686,7 +2740,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
   });
 
   v1Router.get("/profiles/:username/webhooks", requireAuth, async (req, res) => {
-    const profile = await resolveProfileOwner(req.params.username as string, (req.auth!.userId || req.auth!.walletAddress) as string, res);
+    const profile = await resolveProfileOwner(req.params.username as string, req.auth, res);
     if (!profile) return;
 
     const webhooks = await prisma.webhook.findMany({
@@ -2698,7 +2752,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
   });
 
   v1Router.delete("/profiles/:username/webhooks/:id", requireAuth, async (req, res) => {
-    const profile = await resolveProfileOwner(req.params.username as string, (req.auth!.userId || req.auth!.walletAddress) as string, res);
+    const profile = await resolveProfileOwner(req.params.username as string, req.auth, res);
     if (!profile) return;
 
     const webhook = await prisma.webhook.findFirst({
@@ -2711,7 +2765,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
   });
 
   v1Router.get("/profiles/:username/webhooks/:id/deliveries", requireAuth, async (req, res) => {
-    const profile = await resolveProfileOwner(req.params.username as string, (req.auth!.userId || req.auth!.walletAddress) as string, res);
+    const profile = await resolveProfileOwner(req.params.username as string, req.auth, res);
     if (!profile) return;
 
     const webhook = await prisma.webhook.findFirst({
@@ -2719,8 +2773,11 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     });
     if (!webhook) return sendError(res, 404, "Webhook not found");
 
-    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
-    const offset = parseInt(req.query.offset as string) || 0;
+    const pagination = paginationSchema.safeParse(req.query);
+    if (!pagination.success) {
+      return sendError(res, 400, "Invalid pagination parameters", "INVALID_PAGINATION");
+    }
+    const { limit, offset } = pagination.data;
 
     const [deliveries, total] = await Promise.all([
       prisma.webhookDelivery.findMany({
@@ -3453,7 +3510,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       }
 
       // Verify authenticated wallet owns the profile
-      if (!req.auth || req.auth.walletAddress !== profile.walletAddress) {
+      if (!isProfileOwner(req.auth, profile)) {
         return sendError(res, 403, "Forbidden: You do not own this profile");
       }
 
@@ -3698,7 +3755,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       }
 
       // Verify authenticated wallet owns the profile
-      if (!req.auth || req.auth.walletAddress !== profile.walletAddress) {
+      if (!isProfileOwner(req.auth, profile)) {
         return sendError(res, 403, "Forbidden: You do not own this profile");
       }
 
@@ -3758,7 +3815,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       }
 
       // Verify authenticated wallet owns the profile
-      if (!req.auth || req.auth.walletAddress !== profile.walletAddress) {
+      if (!isProfileOwner(req.auth, profile)) {
         return sendError(res, 403, "Forbidden: You do not own this profile");
       }
 
@@ -3800,7 +3857,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       }
 
       // Verify authenticated wallet owns the profile
-      if (!req.auth || req.auth.walletAddress !== profile.walletAddress) {
+      if (!isProfileOwner(req.auth, profile)) {
         return sendError(res, 403, "Forbidden: You do not own this profile");
       }
 
@@ -3955,7 +4012,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       // Creator view — return drips for this profile if caller owns it
       const profile = await prisma.profile.findUnique({ where: { id: profileId } });
       if (!profile) return sendError(res, 404, "Profile not found");
-      if (profile.walletAddress !== req.auth!.walletAddress) return sendError(res, 403, "Forbidden");
+      if (!isProfileOwner(req.auth, profile)) return sendError(res, 403, "Forbidden");
 
       const subscriptions = await prisma.recurringSupport.findMany({
         where: { profileId, status: { not: "cancelled" } },
@@ -4132,7 +4189,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
         return sendError(res, 404, "Profile not found");
       }
 
-      if (profile.ownerId !== user.id) {
+      if (!isProfileOwner(req.auth, profile)) {
         return sendError(res, 403, "You can only delete your own profile");
       }
 

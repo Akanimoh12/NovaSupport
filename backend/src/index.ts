@@ -102,7 +102,7 @@ import { startDripScheduler } from "./services/drip-scheduler.js";
 import { startWebhookProcessor } from "./services/webhook-processor.js";
 import { EventIndexer } from "./services/event-indexer.js";
 import { createSorobanRpcClient } from "./services/soroban-rpc-client.js";
-import { startWeeklyDigestScheduler } from "./services/weekly-digest.js";
+import { startWeeklyDigestScheduler, stopWeeklyDigestScheduler } from "./services/weekly-digest.js";
 import { prisma } from "./db.js";
 
 const port = Number(process.env.PORT ?? 4000);
@@ -133,17 +133,21 @@ const eventIndexer =
       })
     : null;
 
-app.listen(port, () => {
+let dripScheduler: ReturnType<typeof startDripScheduler> | null = null;
+let webhookProcessor: ReturnType<typeof startWebhookProcessor> | null = null;
+let shuttingDown = false;
+
+const server = app.listen(port, () => {
   logger.info({ port }, `NovaSupport backend listening on http://localhost:${port}`);
 
   // Start the recurring drip scheduler if enabled
-  startDripScheduler();
+  dripScheduler = startDripScheduler();
 
   // Start the weekly digest email scheduler
   startWeeklyDigestScheduler();
 
   // Start the webhook delivery processor
-  startWebhookProcessor();
+  webhookProcessor = startWebhookProcessor();
 
   if (eventIndexer) {
     eventIndexer.start();
@@ -156,4 +160,43 @@ app.listen(port, () => {
       "Soroban event indexer disabled - set SOROBAN_CONTRACT_ID to enable it",
     );
   }
+});
+
+async function shutdown(signal: NodeJS.Signals): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
+  logger.info({ signal }, "Shutdown signal received");
+
+  try {
+    await Promise.all([
+      dripScheduler?.stop(),
+      webhookProcessor?.stop(),
+      eventIndexer?.stop(),
+      Promise.resolve().then(() => stopWeeklyDigestScheduler()),
+    ]);
+
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    await prisma.$disconnect();
+    await Sentry.close(2_000);
+    logger.info({ signal }, "Graceful shutdown complete");
+    process.exit(signal === "SIGINT" ? 130 : 143);
+  } catch (err) {
+    logger.error({ err, signal }, "Graceful shutdown failed");
+    process.exit(1);
+  }
+}
+
+process.once("SIGTERM", () => {
+  void shutdown("SIGTERM");
+});
+
+process.once("SIGINT", () => {
+  void shutdown("SIGINT");
 });
