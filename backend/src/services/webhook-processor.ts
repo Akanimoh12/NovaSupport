@@ -42,7 +42,12 @@ export async function processPendingWebhookDeliveries() {
       const nextAttempt = delivery.attemptCount + 1;
       const willRetry = result.willRetry && shouldRetry(nextAttempt);
 
-      let nextRetryAt: Date | undefined;
+      // When permanently failed, nextRetryAt must be explicitly set to null so
+      // Prisma writes NULL to the column. Leaving it undefined causes Prisma to
+      // omit the field entirely, leaving any previous value in place and causing
+      // the processor's `nextRetryAt <= now` query to re-pick the delivery on
+      // the next poll cycle (#601).
+      let nextRetryAt: Date | null = null;
       if (willRetry) {
         const delayMs = getNextRetryDelay(delivery.attemptCount);
         if (delayMs !== null) {
