@@ -3003,27 +3003,29 @@ All errors return JSON with an \`error\` field and optional \`code\`:
             data: parsed.data,
           });
 
-          const milestones = await tx.milestone.findMany({
-            where: {
-              profileId: parsed.data.profileId,
-              assetCode: parsed.data.assetCode,
-              status: "active",
-            },
-          });
-
-          for (const milestone of milestones) {
-            const updated = await tx.milestone.update({
-              where: { id: milestone.id },
-              data: {
-                currentAmount: { increment: parsed.data.amount },
+          if (parsed.data.status === "SUCCESS") {
+            const milestones = await tx.milestone.findMany({
+              where: {
+                profileId: parsed.data.profileId,
+                assetCode: parsed.data.assetCode,
+                status: "active",
               },
             });
 
-            if (Number(updated.currentAmount) >= Number(updated.targetAmount)) {
-              await tx.milestone.update({
+            for (const milestone of milestones) {
+              const updated = await tx.milestone.update({
                 where: { id: milestone.id },
-                data: { status: "reached" },
+                data: {
+                  currentAmount: { increment: parsed.data.amount },
+                },
               });
+
+              if (Number(updated.currentAmount) >= Number(updated.targetAmount)) {
+                await tx.milestone.update({
+                  where: { id: milestone.id },
+                  data: { status: "reached" },
+                });
+              }
             }
           }
 

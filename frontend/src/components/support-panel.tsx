@@ -68,6 +68,7 @@ export function SupportPanel({
   const [copied, setCopied] = useState(false);
   const [paymentAsset, setPaymentAsset] = useState<{ code: string; issuer?: string }>({ code: "XLM" });
   const [visitorBalances, setVisitorBalances] = useState<any[]>([]);
+  const [visitorBalancesLoaded, setVisitorBalancesLoaded] = useState(false);
   const [estimatedReceived, setEstimatedReceived] = useState<string | null>(null);
   const [noPathFound, setNoPathFound] = useState(false);
   const [message, setMessage] = useState("");
@@ -206,6 +207,8 @@ export function SupportPanel({
         setVisitorBalances(account.balances as any[]);
       } catch {
         setVisitorBalances([]);
+      } finally {
+        setVisitorBalancesLoaded(true);
       }
     }
     fetchBalances();
@@ -300,45 +303,51 @@ export function SupportPanel({
           >
             Pay with
           </label>
-          <select
-            id={paymentAssetSelectId}
-            aria-label="Payment asset"
-            value={
-              paymentAsset
-                ? paymentAsset.code === "XLM"
-                  ? "native"
-                  : `${paymentAsset.code}:${paymentAsset.issuer}`
-                : ""
-            }
-            onChange={(e) => {
-              const val = e.target.value;
-              if (val === "native") setPaymentAsset({ code: "XLM" });
-              else {
-                const [code, issuer] = val.split(":");
-                setPaymentAsset({ code, issuer });
+          {visitorBalancesLoaded && visitorBalances.length === 0 ? (
+            <p className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-sky/60">
+              Your wallet has no supported assets. Fund your wallet to continue.
+            </p>
+          ) : (
+            <select
+              id={paymentAssetSelectId}
+              aria-label="Payment asset"
+              value={
+                paymentAsset
+                  ? paymentAsset.code === "XLM"
+                    ? "native"
+                    : `${paymentAsset.code}:${paymentAsset.issuer}`
+                  : ""
               }
-            }}
-            className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white focus:border-mint/50 focus:outline-none appearance-none"
-          >
-            {visitorBalances.map((b: any) => (
-              <option
-                key={
-                  b.asset_type === "native"
-                    ? "native"
-                    : `${b.asset_code}:${b.asset_issuer}`
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === "native") setPaymentAsset({ code: "XLM" });
+                else {
+                  const [code, issuer] = val.split(":");
+                  setPaymentAsset({ code, issuer });
                 }
-                value={
-                  b.asset_type === "native"
-                    ? "native"
-                    : `${b.asset_code}:${b.asset_issuer}`
-                }
-                className="bg-ink text-white"
-              >
-                {b.asset_type === "native" ? "XLM" : b.asset_code} (
-                {parseFloat(b.balance).toFixed(2)})
-              </option>
-            ))}
-          </select>
+              }}
+              className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white focus:border-mint/50 focus:outline-none appearance-none"
+            >
+              {visitorBalances.map((b: any) => (
+                <option
+                  key={
+                    b.asset_type === "native"
+                      ? "native"
+                      : `${b.asset_code}:${b.asset_issuer}`
+                  }
+                  value={
+                    b.asset_type === "native"
+                      ? "native"
+                      : `${b.asset_code}:${b.asset_issuer}`
+                  }
+                  className="bg-ink text-white"
+                >
+                  {b.asset_type === "native" ? "XLM" : b.asset_code} (
+                  {parseFloat(b.balance).toFixed(2)})
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         {/* Amount Input */}

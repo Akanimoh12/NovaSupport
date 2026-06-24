@@ -16,6 +16,10 @@ vi.mock('@stellar/stellar-sdk', () => ({
   Asset: {
     native: vi.fn(() => ({ type: 'native' })),
   },
+  BASE_FEE: '100',
+  Horizon: {},
+  Transaction: vi.fn(),
+  FeeBumpTransaction: vi.fn(),
   TransactionBuilder: {
     fromXDR: vi.fn(() => ({ mocked: true })),
   },
@@ -182,6 +186,19 @@ describe('SupportPanel', () => {
     render(<SupportPanel {...mockProps} />);
     await waitFor(() => expect(screen.getByText('Pay with')).toBeInTheDocument());
     expect(screen.getByText('Amount')).toBeInTheDocument();
+  });
+
+  it('shows empty wallet message when connected wallet has no balances', async () => {
+    vi.mocked(horizonServer.loadAccount).mockResolvedValue({
+      balances: [],
+    } as never);
+
+    render(<SupportPanel {...mockProps} />);
+    await waitFor(() =>
+      expect(
+        screen.getByText('Your wallet has no supported assets. Fund your wallet to continue.'),
+      ).toBeInTheDocument(),
+    );
   });
 
   it('renders recurring support toggle', async () => {
