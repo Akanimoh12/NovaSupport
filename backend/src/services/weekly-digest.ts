@@ -2,88 +2,99 @@ import { prisma } from "../db.js";
 import { sendEmail } from "../mailer.js";
 import { logger } from "../logger.js";
 
-export async function sendWeeklyDigests() {
-  const profiles = await prisma.profile.findMany({
-    where: {
-      email: { not: null },
-      emailVerified: true,
-      notificationPreferences: { weeklyDigest: true },
-    },
-    include: {
-      notificationPreferences: true,
-    },
-  });
+const PROFILE_BATCH_SIZE = 100;
 
-  logger.info({ profilesToProcess: profiles.length }, "Weekly digest run started");
+export async function sendWeeklyDigests(prismaClient = prisma) {
+  let cursor: string | undefined;
+  let totalProfilesEmailed = 0;
+  let totalErrors = 0;
 
-  let profilesEmailed = 0;
-  let errors = 0;
+  logger.info("Weekly digest run started");
 
-  for (const profile of profiles) {
-    try {
-      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  do {
+    const profiles = await prismaClient.profile.findMany({
+      where: {
+        email: { not: null },
+        emailVerified: true,
+        notificationPreferences: { weeklyDigest: true },
+      },
+      include: {
+        notificationPreferences: true,
+      },
+      take: PROFILE_BATCH_SIZE,
+      orderBy: { id: "asc" },
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    });
 
-      const [transactions, uniqueSupporters, milestonesReached, assetGroups] = await Promise.all([
-        prisma.supportTransaction.findMany({
-          where: {
-            profileId: profile.id,
-            status: { not: "failed" },
-            createdAt: { gte: sevenDaysAgo },
-          },
-          orderBy: { createdAt: "desc" },
-        }),
-        prisma.supportTransaction.findMany({
-          where: {
-            profileId: profile.id,
-            supporterAddress: { not: null },
-            createdAt: { gte: sevenDaysAgo },
-          },
-          distinct: ["supporterAddress"],
-          select: { supporterAddress: true },
-        }),
-        prisma.milestone.findMany({
-          where: {
-            profileId: profile.id,
-            status: "reached",
-            updatedAt: { gte: sevenDaysAgo },
-          },
-        }),
-        prisma.supportTransaction.groupBy({
-          by: ["assetCode"],
-          where: {
-            profileId: profile.id,
-            status: { not: "failed" },
-            createdAt: { gte: sevenDaysAgo },
-          },
-          _sum: { amount: true },
-          _count: true,
-        }),
-      ]);
+    if (profiles.length === 0) break;
 
-      const totalReceived = transactions.reduce(
-        (sum, tx) => sum + Number(tx.amount),
-        0,
-      );
-      const txCount = transactions.length;
-      const supporterCount = uniqueSupporters.length;
-      const milestonesCount = milestonesReached.length;
+    let profilesEmailed = 0;
+    let errors = 0;
 
-      if (txCount === 0) continue;
+    for (const profile of profiles) {
+      try {
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-      const assetBreakdown = assetGroups
-        .map((g) => `${g._sum.amount?.toFixed(7) ?? "0"} ${g.assetCode}`)
-        .join(", ");
+        const [transactions, uniqueSupporters, milestonesReached, assetGroups] = await Promise.all([
+          prismaClient.supportTransaction.findMany({
+            where: {
+              profileId: profile.id,
+              status: { not: "failed" },
+              createdAt: { gte: sevenDaysAgo },
+            },
+            orderBy: { createdAt: "desc" },
+          }),
+          prismaClient.supportTransaction.findMany({
+            where: {
+              profileId: profile.id,
+              supporterAddress: { not: null },
+              createdAt: { gte: sevenDaysAgo },
+            },
+            distinct: ["supporterAddress"],
+            select: { supporterAddress: true },
+          }),
+          prismaClient.milestone.findMany({
+            where: {
+              profileId: profile.id,
+              status: "reached",
+              updatedAt: { gte: sevenDaysAgo },
+            },
+          }),
+          prismaClient.supportTransaction.groupBy({
+            by: ["assetCode"],
+            where: {
+              profileId: profile.id,
+              status: { not: "failed" },
+              createdAt: { gte: sevenDaysAgo },
+            },
+            _sum: { amount: true },
+            _count: true,
+          }),
+        ]);
 
-      const milestonesSection =
-        milestonesCount > 0
-          ? `<p><strong>Milestones reached:</strong> ${milestonesCount}</p>`
-          : "";
+        // #656: totalReceived was removed — summing amounts across different asset
+        // codes (XLM, USDC, AQUA, …) produces a meaningless cross-currency figure.
+        // assetBreakdown already shows per-asset totals correctly.
+        const txCount = transactions.length;
+        const supporterCount = uniqueSupporters.length;
+        const milestonesCount = milestonesReached.length;
 
-      const html = `
+        if (txCount === 0) continue;
+
+        const assetBreakdown = assetGroups
+          .map((g) => `${g._sum.amount?.toFixed(7) ?? "0"} ${g.assetCode}`)
+          .join(", ");
+
+        const milestonesSection =
+          milestonesCount > 0
+            ? `<p><strong>Milestones reached:</strong> ${milestonesCount}</p>`
+            : "";
+
+        const html = `
         <h2>Your Weekly NovaSupport Recap</h2>
         <p>Here's what happened with your profile <strong>${profile.displayName}</strong> this week:</p>
         <ul>
-          <li><strong>Total received:</strong> ${totalReceived.toFixed(7)} (${assetBreakdown})</li>
+          <li><strong>Total received:</strong> ${assetBreakdown}</li>
           <li><strong>Transactions:</strong> ${txCount}</li>
           <li><strong>New supporters:</strong> ${supporterCount}</li>
         </ul>
@@ -94,24 +105,32 @@ export async function sendWeeklyDigests() {
         <p>Thanks,<br/>The NovaSupport Team</p>
       `;
 
-      await sendEmail({
-        to: profile.email!,
-        subject: "Your NovaSupport weekly recap",
-        html,
-      });
+        await sendEmail({
+          to: profile.email!,
+          subject: "Your NovaSupport weekly recap",
+          html,
+        });
 
-      profilesEmailed++;
-    } catch (err) {
-      logger.error(
-        { err, profileId: profile.id },
-        "Failed to send weekly digest for profile",
-      );
-      errors++;
+        profilesEmailed++;
+      } catch (err) {
+        logger.error(
+          { err, profileId: profile.id },
+          "Failed to send weekly digest for profile",
+        );
+        errors++;
+      }
     }
-  }
+
+    totalProfilesEmailed += profilesEmailed;
+    totalErrors += errors;
+
+    cursor = profiles.length === PROFILE_BATCH_SIZE
+      ? profiles[profiles.length - 1]?.id
+      : undefined;
+  } while (cursor !== undefined);
 
   logger.info(
-    { profilesEmailed, errors },
+    { profilesEmailed: totalProfilesEmailed, errors: totalErrors },
     "Weekly digest run completed",
   );
 }

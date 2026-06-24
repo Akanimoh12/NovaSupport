@@ -163,3 +163,57 @@ test("processDueRecurringSupports filters for active status with due nextRunAt",
   assert.equal(findManyCall.where.status, "active");
   assert.ok(findManyCall.where.nextRunAt.lte instanceof Date);
 });
+
+// ── Batch pagination tests (issue #654) ──────────────────────────────────────
+
+test("processDueRecurringSupports uses take: 100 to limit each query", async () => {
+  const mockPrisma = buildPrismaMock({ recurringSupports: [] });
+
+  await processDueRecurringSupports(mockPrisma as any);
+
+  const findManyArg = getFirstArg<{ take: number }>(mockPrisma.recurringSupport.findMany);
+  assert.equal(findManyArg.take, 100);
+});
+
+test("processDueRecurringSupports stops after one query when batch is smaller than 100", async () => {
+  // 2 records returned — well under the batch size, so no second query needed
+  const mockPrisma = buildPrismaMock({
+    recurringSupports: [makeSupport({ id: "drip-1" }), makeSupport({ id: "drip-2" })],
+  });
+
+  await processDueRecurringSupports(mockPrisma as any);
+
+  assert.equal(mockPrisma.recurringSupport.findMany.mock.callCount(), 1);
+});
+
+test("processDueRecurringSupports queries again when a full batch of 100 is returned", async () => {
+  const firstBatch = Array.from({ length: 100 }, (_, i) =>
+    makeSupport({ id: `drip-${i}` }),
+  );
+
+  let call = 0;
+  const txRecurringSupportUpdate = mock.fn(() => Promise.resolve({}));
+  const txRecurringSupportExecutionCreate = mock.fn(() => Promise.resolve({}));
+  const recurringSupportFindMany = mock.fn(() => {
+    call++;
+    return Promise.resolve(call === 1 ? firstBatch : []);
+  });
+  const $transaction = mock.fn((cb: (tx: unknown) => Promise<void>) => {
+    const tx = {
+      recurringSupportExecution: { create: txRecurringSupportExecutionCreate },
+      recurringSupport: { update: txRecurringSupportUpdate },
+    };
+    return cb(tx);
+  });
+  const mockPrisma = {
+    recurringSupport: { findMany: recurringSupportFindMany },
+    $transaction,
+  };
+
+  await processDueRecurringSupports(mockPrisma as any);
+
+  // First call returned a full batch → second call made to check for more
+  assert.equal(recurringSupportFindMany.mock.callCount(), 2);
+  // All 100 records in the first batch were processed
+  assert.equal($transaction.mock.callCount(), 100);
+});

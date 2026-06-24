@@ -3,21 +3,30 @@ import { prisma } from "../db.js";
 import { logger } from "../logger.js";
 import { Metrics } from "../metrics.js";
 
+const DRIP_BATCH_SIZE = 100;
+
 export async function processDueRecurringSupports(prismaClient = prisma) {
   const now = new Date();
-  
-  const dueSupports = await prismaClient.recurringSupport.findMany({
-    where: {
-      status: "active",
-      nextRunAt: { lte: now },
-    },
-    include: {
-      profile: true,
-      supporter: true,
-    },
-  });
+  let cursor: string | undefined;
 
-  for (const support of dueSupports) {
+  do {
+    const dueSupports = await prismaClient.recurringSupport.findMany({
+      where: {
+        status: "active",
+        nextRunAt: { lte: now },
+      },
+      include: {
+        profile: true,
+        supporter: true,
+      },
+      take: DRIP_BATCH_SIZE,
+      orderBy: { id: "asc" },
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    });
+
+    if (dueSupports.length === 0) break;
+
+    for (const support of dueSupports) {
     // #608: supporterId is NULL when the supporter's account was deleted (SET NULL FK).
     // Mark the subscription cancelled so it stops appearing as due and so
     // the profile owner can see the cancellation in their dashboard.
@@ -72,6 +81,11 @@ export async function processDueRecurringSupports(prismaClient = prisma) {
       Metrics.dripErrors();
     }
   }
+
+    cursor = dueSupports.length === DRIP_BATCH_SIZE
+      ? dueSupports[dueSupports.length - 1].id
+      : undefined;
+  } while (cursor !== undefined);
 }
 
 export type SchedulerHandle = {

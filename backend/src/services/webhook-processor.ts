@@ -21,6 +21,17 @@ export async function processPendingWebhookDeliveries() {
   });
 
   for (const delivery of pendingDeliveries) {
+    // Atomically claim the row before delivery to prevent duplicate sends when
+    // processPendingWebhookDeliveries is invoked concurrently (e.g., the HTTP
+    // handler and the interval timer fire at the same time for the same row).
+    // updateMany returns { count: 0 } instead of throwing when the row was
+    // already claimed, so we can safely skip it.
+    const claimed = await prisma.webhookDelivery.updateMany({
+      where: { id: delivery.id, status: "pending" },
+      data: { status: "processing" },
+    });
+    if (claimed.count === 0) continue;
+
     const payload = delivery.payload as Record<string, unknown>;
     const result = await deliverWebhook(delivery.webhook.url, delivery.webhook.secret, payload);
 
