@@ -22,8 +22,7 @@ const transporter = nodemailer.createTransport({
 
 export async function sendEmail(options: SendEmailOptions): Promise<void> {
   if (!process.env.SMTP_HOST) {
-    logger.warn("SMTP_HOST is not set — skipping email send");
-    return;
+    return Promise.reject(new Error("SMTP_HOST is not configured — email cannot be sent"));
   }
 
   await transporter.sendMail({
