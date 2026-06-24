@@ -1974,7 +1974,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
 
   // ── Email verification (#275) ─────────────────────────────────────────
 
-  v1Router.post("/profiles/:username/verify-email", async (req, res) => {
+  v1Router.post("/profiles/:username/verify-email", requireAuth, async (req, res) => {
     const { token } = req.body as { token?: unknown };
 
     if (!token || typeof token !== "string") {
@@ -1983,8 +1983,17 @@ All errors return JSON with an \`error\` field and optional \`code\`:
 
     try {
       const profile = await prisma.profile.findFirst({
-        where: { username: req.params.username, emailVerificationToken: token },
+        where: { username: req.params.username as string, emailVerificationToken: token },
       });
+
+      if (!profile) {
+        return sendError(res, 404, "Invalid or expired verification token", "TOKEN_INVALID");
+      }
+
+      // Ensure the authenticated user owns this profile
+      if (!req.auth || req.auth.walletAddress !== profile.walletAddress) {
+        return sendError(res, 403, "Forbidden: You do not own this profile");
+      }
 
       if (!profile) {
         return sendError(res, 404, "Invalid or expired verification token", "TOKEN_INVALID");
@@ -2516,8 +2525,8 @@ All errors return JSON with an \`error\` field and optional \`code\`:
    *       500:
    *         description: Internal server error
    */
-  v1Router.get("/profiles/:username/transactions/export", async (req, res) => {
-    const { username } = req.params;
+  v1Router.get("/profiles/:username/transactions/export", requireAuth, async (req, res) => {
+    const username = req.params.username as string;
     const { startDate, endDate, taxYear } = req.query;
 
     try {
@@ -2527,6 +2536,11 @@ All errors return JSON with an \`error\` field and optional \`code\`:
 
       if (!profile) {
         return sendError(res, 404, "Profile not found");
+      }
+
+      // Verify the authenticated user owns this profile
+      if (!req.auth || req.auth.walletAddress !== profile.walletAddress) {
+        return sendError(res, 403, "Forbidden: You do not own this profile");
       }
 
       // Parse dates or use tax year
@@ -2966,6 +2980,15 @@ All errors return JSON with an \`error\` field and optional \`code\`:
         assetCode: parsed.data.assetCode,
         assetIssuer: parsed.data.assetIssuer,
       };
+
+      // Verify the profile exists before touching Horizon (#574)
+      const profileExists = await prisma.profile.findUnique({
+        where: { id: parsed.data.profileId },
+        select: { id: true },
+      });
+      if (!profileExists) {
+        return sendError(res, 404, "Profile not found");
+      }
 
       const skipHorizonValidation = process.env.SKIP_HORIZON_VALIDATION === "true";
       if (skipHorizonValidation) {
