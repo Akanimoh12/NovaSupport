@@ -116,21 +116,71 @@ export async function sendWeeklyDigests() {
   );
 }
 
+const WEEKLY_DIGEST_JOB_NAME = "weekly-digest";
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Read the persisted last-run timestamp from the database.
+ * Returns null when no record exists (i.e. the job has never run).
+ */
+async function getLastDigestRunAt(): Promise<Date | null> {
+  const row = await prisma.schedulerJob.findUnique({
+    where: { name: WEEKLY_DIGEST_JOB_NAME },
+  });
+  return row?.lastRunAt ?? null;
+}
+
+/**
+ * Persist the current time as the last-run timestamp for the weekly digest.
+ * Called immediately after a successful digest run so that a subsequent
+ * process restart does not re-fire the job prematurely (#592).
+ */
+async function markDigestRunAt(at: Date): Promise<void> {
+  await prisma.schedulerJob.upsert({
+    where: { name: WEEKLY_DIGEST_JOB_NAME },
+    create: { name: WEEKLY_DIGEST_JOB_NAME, lastRunAt: at },
+    update: { lastRunAt: at },
+  });
+}
+
+/**
+ * Run the weekly digest only if at least 7 days have elapsed since the last
+ * successful run. Guards against re-firing on every process restart (#592).
+ */
+async function maybeRunWeeklyDigest(): Promise<void> {
+  const lastRunAt = await getLastDigestRunAt();
+  const now = Date.now();
+
+  if (lastRunAt !== null && now - lastRunAt.getTime() < SEVEN_DAYS_MS) {
+    const msUntilDue = SEVEN_DAYS_MS - (now - lastRunAt.getTime());
+    const hoursUntilDue = Math.ceil(msUntilDue / (60 * 60 * 1000));
+    logger.info(
+      { lastRunAt, hoursUntilDue },
+      "Weekly digest skipped — not yet due",
+    );
+    return;
+  }
+
+  const runAt = new Date(now);
+  await sendWeeklyDigests();
+  await markDigestRunAt(runAt);
+}
+
 let digestInterval: ReturnType<typeof setInterval> | null = null;
 
 export function startWeeklyDigestScheduler() {
   if (process.env.WEEKLY_DIGEST_ENABLED === "true") {
     logger.info("Weekly digest scheduler enabled. Starting...");
 
-    const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
-
-    sendWeeklyDigests().catch((err) => {
-      logger.error({ err }, "Error in initial sendWeeklyDigests run");
+    // Check the persisted last-run time before firing so that a restart or
+    // rolling deploy does not immediately re-send digests (#592).
+    maybeRunWeeklyDigest().catch((err) => {
+      logger.error({ err }, "Error in initial maybeRunWeeklyDigest check");
     });
 
     digestInterval = setInterval(() => {
-      sendWeeklyDigests().catch((err) => {
-        logger.error({ err }, "Error in sendWeeklyDigests interval");
+      maybeRunWeeklyDigest().catch((err) => {
+        logger.error({ err }, "Error in maybeRunWeeklyDigest interval");
       });
     }, SEVEN_DAYS_MS);
   } else {

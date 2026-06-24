@@ -218,3 +218,14 @@ model IndexerCursor {
   @@unique([network, contractId])
   @@map("indexer_cursors")
 }
+
+// #592: Persists the last-run timestamp for recurring server-side jobs so
+// that restarts and rolling deploys do not immediately re-fire the job.
+// One row per job name; upserted on every successful run.
+model SchedulerJob {
+  name      String   @id
+  lastRunAt DateTime
+  updatedAt DateTime @updatedAt
+
+  @@map("scheduler_jobs")
+}
