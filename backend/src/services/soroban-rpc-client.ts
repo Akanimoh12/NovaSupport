@@ -99,13 +99,13 @@ function decodeSupportEvent(event: RpcEvent): SupportEventRecord | null {
     txHash: event.txHash,
     ledger: event.ledger,
     pagingToken: event.pagingToken ?? event.id,
-    amount: String(native.amount ?? "0"),
-    assetCode: String(native.asset_code ?? native.assetCode ?? ""),
+    amount: String(nativeObj.amount ?? "0"),
+    assetCode: String(nativeObj.asset_code ?? nativeObj.assetCode ?? ""),
     assetIssuer: null,
     recipientAddress: asAddress(recipient),
     supporterAddress: asAddress(supporter),
-    message: native.message == null ? null : String(native.message),
-    emittedAt: new Date(toNumber(native.timestamp) * 1000),
+    message: nativeObj.message == null ? null : String(nativeObj.message),
+    emittedAt: new Date(toNumber(nativeObj.timestamp) * 1000),
   };
 }
 

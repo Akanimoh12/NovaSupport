@@ -4394,7 +4394,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
   // Must be registered after all routes and before any other error handlers
   if (process.env.SENTRY_DSN) {
     app.use(Sentry.expressErrorHandler({
-      shouldHandleError(error) {
+      shouldHandleError(_error: Error) {
         // Capture 4xx client errors as well as 5xx server errors
         return true;
       },
