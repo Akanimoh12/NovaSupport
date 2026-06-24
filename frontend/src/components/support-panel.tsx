@@ -419,6 +419,9 @@ export function SupportPanel({
               No DEX path found from {paymentAsset?.code} to{" "}
               {recipientAsset.code}
             </p>
+            <p className="text-xs text-red-300/70 text-center mt-1">
+              Try sending XLM directly or choose a different payment asset.
+            </p>
           </div>
         )}
       </div>
