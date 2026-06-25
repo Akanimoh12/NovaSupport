@@ -154,6 +154,8 @@ export function SupportPanel({
           // Non-critical — recurring registration failure doesn't affect the payment.
         });
       }
+
+      await loadBalance(visitorAddress);
     } catch (err: unknown) {
       showToast(mapWalletError(err), "error");
     } finally {

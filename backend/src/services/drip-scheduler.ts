@@ -5,6 +5,19 @@ import { Metrics } from "../metrics.js";
 
 const DRIP_BATCH_SIZE = 100;
 
+function addMonths(date: Date, months: number): Date {
+  const result = new Date(date);
+  const targetMonth = result.getMonth() + months;
+  result.setMonth(targetMonth);
+  // setMonth overflows into the next month when the day doesn't exist
+  // there (e.g. Jan 31 + 1 month -> Mar 3). Clamp to the last day of
+  // the target month instead.
+  if (result.getMonth() !== ((targetMonth % 12) + 12) % 12) {
+    result.setDate(0);
+  }
+  return result;
+}
+
 export async function processDueRecurringSupports(prismaClient = prisma) {
   const now = new Date();
   let cursor: string | undefined;
@@ -42,13 +55,10 @@ export async function processDueRecurringSupports(prismaClient = prisma) {
     try {
       const supporter = support.supporter;
       // Calculate nextRunAt based on frequency
-      const nextRunAt = new Date(now);
-      if (support.frequency === "weekly") {
-        nextRunAt.setDate(nextRunAt.getDate() + 7);
-      } else {
-        // Default to monthly (30 days)
-        nextRunAt.setDate(nextRunAt.getDate() + 30);
-      }
+      const nextRunAt =
+        support.frequency === "weekly"
+          ? new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
+          : addMonths(now, 1);
 
       await prismaClient.$transaction(async (tx: any) => {
         // Create the pending RecurringSupportExecution

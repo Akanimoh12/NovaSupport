@@ -109,11 +109,34 @@ test("processDueRecurringSupports advances nextRunAt for monthly frequency", asy
   const updateCall = getFirstArg<TxUpdateArg>(mockPrisma.txRecurringSupportUpdate);
   const now = new Date();
   const expectedNext = new Date(now);
-  expectedNext.setDate(expectedNext.getDate() + 30);
+  expectedNext.setMonth(expectedNext.getMonth() + 1);
   assert.ok(
     Math.abs(updateCall.data.nextRunAt.getTime() - expectedNext.getTime()) < 2000,
-    `nextRunAt should be ~30 days from now`,
+    `nextRunAt should be ~1 calendar month from now`,
   );
+});
+
+// ── Month-boundary regression test (issue #645) ──────────────────────────────
+
+test("processDueRecurringSupports does not overflow into the wrong month at month-end boundaries", async () => {
+  const jan31 = new Date(Date.UTC(2024, 0, 31, 12, 0, 0));
+  const mockPrisma = buildPrismaMock({
+    recurringSupports: [makeSupport({ frequency: "monthly", nextRunAt: jan31 })],
+  });
+
+  const originalNow = Date.now;
+  Date.now = () => jan31.getTime();
+  try {
+    await processDueRecurringSupports(mockPrisma as any);
+  } finally {
+    Date.now = originalNow;
+  }
+
+  const updateCall = getFirstArg<TxUpdateArg>(mockPrisma.txRecurringSupportUpdate);
+  // Jan 31 + 1 month should clamp to Feb 29 (2024 is a leap year), not roll
+  // over into March as `setDate(getDate() + 30)` used to.
+  assert.equal(updateCall.data.nextRunAt.getUTCMonth(), 1, "should land in February, not March");
+  assert.equal(updateCall.data.nextRunAt.getUTCDate(), 29);
 });
 
 test("processDueRecurringSupports no-ops when no due supports exist", async () => {

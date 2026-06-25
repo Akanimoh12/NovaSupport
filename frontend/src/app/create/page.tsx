@@ -173,6 +173,8 @@ export default function CreatePage() {
   };
 
   async function handleSubmit() {
+    if (loading) return;
+
     setError(null);
     setFieldErrors({ username: null, email: null });
 
@@ -564,8 +566,11 @@ export default function CreatePage() {
                 type="button"
                 onClick={handleSubmit}
                 disabled={loading || rateLimited}
-                className="flex-[2] rounded-full bg-mint px-5 py-4 text-sm font-semibold text-ink transition hover:bg-white active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-[2] flex items-center justify-center gap-2 rounded-full bg-mint px-5 py-4 text-sm font-semibold text-ink transition hover:bg-white active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
               >
+                {loading && (
+                  <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-ink border-t-transparent" />
+                )}
                 {rateLimited
                   ? `Try again in ${rateLimitRemainingMinutes} minute${rateLimitRemainingMinutes === 1 ? "" : "s"}`
                   : loading
