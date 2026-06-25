@@ -83,18 +83,20 @@ export function ActivityFeed({ username, limit = 10 }: ActivityFeedProps) {
   const [hasMore, setHasMore] = useState(false);
 
   useEffect(() => {
-    fetchActivities();
+    const controller = new AbortController();
+    fetchActivities(controller.signal);
+    return () => controller.abort();
   }, [username]);
 
-  async function fetchActivities() {
+  async function fetchActivities(signal?: AbortSignal) {
     try {
       setLoading(true);
       setError(null);
       setMilestonesUnavailable(false);
 
       const [transactionsRes, milestonesRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/profiles/${username}/transactions?limit=100`),
-        fetch(`${API_BASE_URL}/profiles/${username}/milestones`).catch(() => null),
+        fetch(`${API_BASE_URL}/profiles/${username}/transactions?limit=100`, { signal }),
+        fetch(`${API_BASE_URL}/profiles/${username}/milestones`, { signal }).catch(() => null),
       ]);
 
       const transactionsData = transactionsRes.ok
@@ -159,10 +161,11 @@ export function ActivityFeed({ username, limit = 10 }: ActivityFeedProps) {
       setActivities(items);
       setHasMore(items.length > limit);
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       console.error("Failed to fetch activities:", err);
       setError("Failed to load activity feed");
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }
 
@@ -200,7 +203,7 @@ export function ActivityFeed({ username, limit = 10 }: ActivityFeedProps) {
           <AlertTriangle className="h-4 w-4 flex-shrink-0" />
           <span>Milestone data could not be loaded — the feed may be incomplete.</span>
           <button
-            onClick={fetchActivities}
+            onClick={() => fetchActivities()}
             className="ml-auto flex-shrink-0 text-xs underline underline-offset-2 hover:text-yellow-300 transition"
           >
             Retry
