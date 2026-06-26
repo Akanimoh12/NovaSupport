@@ -490,6 +490,8 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     try {
       const profiles = await prisma.profile.findMany({
         select: { walletAddress: true },
+        where: { walletAddress: { not: null } },
+        take: 10_000,
       });
 
       const accountLines = profiles
