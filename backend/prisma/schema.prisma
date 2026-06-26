@@ -251,6 +251,18 @@ model SchedulerJob {
 // #583: Durable state for external-service circuit breakers. This prevents a
 // process restart during an upstream outage from resetting an OPEN breaker to
 // CLOSED and immediately sending a fresh burst of requests.
+model AuthChallenge {
+  id            String   @id @default(cuid())
+  walletAddress String   @unique
+  challenge     String
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([expiresAt])
+  @@map("auth_challenges")
+}
+
 model CircuitBreakerState {
   name          String    @id
   state         String

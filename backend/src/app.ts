@@ -510,24 +510,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     }
   });
 
-  // In-memory challenge store (stateless with signed timestamp)
-  const challenges = new Map<
-    string,
-    { challenge: string; timestamp: number }
-  >();
   const CHALLENGE_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
-
-  function cleanupExpiredChallenges() {
-    const now = Date.now();
-    for (const [key, value] of challenges.entries()) {
-      if (now - value.timestamp > CHALLENGE_EXPIRY_MS) {
-        challenges.delete(key);
-      }
-    }
-  }
-
-  // Cleanup expired challenges every minute
-  setInterval(cleanupExpiredChallenges, 60000);
 
   const allowedOrigins = (
     process.env.ALLOWED_ORIGINS ?? "http://localhost:3000"
@@ -740,7 +723,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
    *                   example: Invalid wallet address
    */
   // Request a challenge nonce for wallet signature
-  v1Router.post("/auth/challenge", authLimiter, (req, res) => {
+  v1Router.post("/auth/challenge", authLimiter, async (req, res) => {
     const { walletAddress } = req.body;
 
     if (!walletAddress || !isValidStellarAddress(walletAddress)) {
@@ -748,7 +731,13 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     }
 
     const challenge = generateChallenge(walletAddress);
-    challenges.set(walletAddress, { challenge, timestamp: Date.now() });
+    const expiresAt = new Date(Date.now() + CHALLENGE_EXPIRY_MS);
+
+    await prisma.authChallenge.upsert({
+      where: { walletAddress },
+      create: { walletAddress, challenge, expiresAt },
+      update: { challenge, expiresAt },
+    });
 
     res.json({ challenge, walletAddress });
   });
@@ -800,21 +789,23 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       return sendError(res, 400, "Invalid wallet address");
     }
 
-    const challengeData = challenges.get(walletAddress);
-    if (!challengeData) {
+    const challengeRow = await prisma.authChallenge.findUnique({
+      where: { walletAddress },
+    });
+    if (!challengeRow) {
       return sendError(res, 400, "No challenge found for this wallet");
     }
 
     // Check if challenge expired
-    if (Date.now() - challengeData.timestamp > CHALLENGE_EXPIRY_MS) {
-      challenges.delete(walletAddress);
+    if (challengeRow.expiresAt < new Date()) {
+      await prisma.authChallenge.delete({ where: { walletAddress } });
       return sendError(res, 400, "Challenge expired");
     }
 
     // Verify the signature
     const isValid = verifySignature(
       walletAddress,
-      challengeData.challenge,
+      challengeRow.challenge,
       signature,
     );
     if (!isValid) {
@@ -822,7 +813,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     }
 
     // Clear the used challenge
-    challenges.delete(walletAddress);
+    await prisma.authChallenge.delete({ where: { walletAddress } });
 
     // Create or get user
     let user = await prisma.user.findFirst({
@@ -2732,6 +2723,13 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     const profile = await resolveProfileOwner(req.params.username as string, req.auth, res);
     if (!profile) return;
 
+    const existingCount = await prisma.webhook.count({
+      where: { profileId: profile.id },
+    });
+    if (existingCount >= 10) {
+      return sendError(res, 422, "Maximum 10 webhooks per profile");
+    }
+
     const secret = randomBytes(32).toString("hex");
     const webhook = await prisma.webhook.create({
       data: { url: parsed.data.url, secret, profileId: profile.id },
@@ -3797,6 +3795,13 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       // Verify authenticated wallet owns the profile
       if (!isProfileOwner(req.auth, profile)) {
         return sendError(res, 403, "Forbidden: You do not own this profile");
+      }
+
+      const activeCount = await prisma.milestone.count({
+        where: { profileId: profile.id, status: { not: "reached" } },
+      });
+      if (activeCount >= 20) {
+        return sendError(res, 422, "Maximum 20 active milestones per profile");
       }
 
       const parsed = createMilestoneSchema.safeParse(req.body);

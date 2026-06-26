@@ -74,13 +74,17 @@ export async function checkAndAwardBadges(profileId: string): Promise<void> {
         }
 
         if (shouldAward) {
-          await prisma.profileBadge.create({
-            data: { profileId, badgeId: badge.id },
-          });
-          logger.info(
-            { profileId, badgeName: badge.name },
-            "Badge auto-awarded",
-          );
+          try {
+            await prisma.profileBadge.create({
+              data: { profileId, badgeId: badge.id },
+            });
+            logger.info(
+              { profileId, badgeName: badge.name },
+              "Badge auto-awarded",
+            );
+          } catch (e: any) {
+            if (e?.code !== "P2002") throw e;
+          }
         }
       }
     } catch (err) {
