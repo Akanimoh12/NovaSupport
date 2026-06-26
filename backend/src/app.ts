@@ -499,7 +499,9 @@ All errors return JSON with an \`error\` field and optional \`code\`:
         .join("\n\n");
 
       const body = [
-        `NETWORK_PASSPHRASE="Test SDF Network ; September 2015"`,
+        `NETWORK_PASSPHRASE="${process.env.STELLAR_NETWORK === 'MAINNET'
+          ? 'Public Global Stellar Network ; September 2015'
+          : 'Test SDF Network ; September 2015'}"`,
         `FEDERATION_SERVER="https://api.novasupport.xyz/federation"`,
         ``,
         accountLines || `# no accounts yet`,
