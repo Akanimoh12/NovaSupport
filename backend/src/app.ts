@@ -4281,6 +4281,11 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     const period = (req.query.period as string) || "daily";
     const assetCode = req.query.assetCode as string | undefined;
 
+    const VALID_PERIODS = ["daily", "weekly", "monthly"] as const;
+    if (!VALID_PERIODS.includes(period as any)) {
+      return res.status(400).json({ error: "period must be daily, weekly, or monthly" });
+    }
+
     const to = new Date(req.query.to as string || new Date().toISOString());
     const from = new Date(
       req.query.from as string ||

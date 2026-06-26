@@ -11,18 +11,29 @@ function getBadgeNameByCriterion(criterion: string): string {
   return map[criterion] ?? "";
 }
 
-const pendingChecks = new Set<string>();
+function profileLockKey(profileId: string): bigint {
+  let h = 0n;
+  for (let i = 0; i < profileId.length; i++) {
+    h = (h * 31n + BigInt(profileId.charCodeAt(i))) & 0x7FFFFFFFFFFFFFFFn;
+  }
+  return h;
+}
 
 export async function checkAndAwardBadges(profileId: string): Promise<void> {
-  if (pendingChecks.has(profileId)) return;
-  pendingChecks.add(profileId);
+  const lockKey = profileLockKey(profileId);
 
-  setTimeout(async () => {
-    try {
-      const badges = await prisma.badge.findMany();
+  try {
+    await prisma.$transaction(async (tx) => {
+      // Serialize concurrent badge checks for the same profile using a
+      // transaction-scoped advisory lock. Concurrent callers block until the
+      // current check commits, then each runs with the latest DB state rather
+      // than being silently dropped.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+
+      const badges = await tx.badge.findMany();
       if (badges.length === 0) return;
 
-      const existingAwards = await prisma.profileBadge.findMany({
+      const existingAwards = await tx.profileBadge.findMany({
         where: { profileId },
         select: { badgeId: true },
       });
@@ -31,20 +42,20 @@ export async function checkAndAwardBadges(profileId: string): Promise<void> {
       if (awardedBadgeIds.size === badges.length) return;
 
       const [txCount, uniqueSupporters, totalsByAsset, milestonesReached] = await Promise.all([
-        prisma.supportTransaction.count({
+        tx.supportTransaction.count({
           where: { profileId, status: { not: "failed" } },
         }),
-        prisma.supportTransaction.findMany({
+        tx.supportTransaction.findMany({
           where: { profileId, supporterAddress: { not: null }, status: { not: "failed" } },
           distinct: ["supporterAddress"],
           select: { supporterAddress: true },
         }),
-        prisma.supportTransaction.groupBy({
+        tx.supportTransaction.groupBy({
           by: ["assetCode"],
           where: { profileId, status: { not: "failed" } },
           _sum: { amount: true },
         }),
-        prisma.milestone.count({
+        tx.milestone.count({
           where: { profileId, status: "reached" },
         }),
       ]);
@@ -75,7 +86,7 @@ export async function checkAndAwardBadges(profileId: string): Promise<void> {
 
         if (shouldAward) {
           try {
-            await prisma.profileBadge.create({
+            await tx.profileBadge.create({
               data: { profileId, badgeId: badge.id },
             });
             logger.info(
@@ -87,13 +98,11 @@ export async function checkAndAwardBadges(profileId: string): Promise<void> {
           }
         }
       }
-    } catch (err) {
-      logger.error(
-        { err, profileId },
-        "Error in checkAndAwardBadges",
-      );
-    } finally {
-      pendingChecks.delete(profileId);
-    }
-  }, 5000);
+    }, { timeout: 30000 });
+  } catch (err) {
+    logger.error(
+      { err, profileId },
+      "Error in checkAndAwardBadges",
+    );
+  }
 }

@@ -90,15 +90,15 @@ export async function getAnalytics(
   endDate?: Date,
   format?: "json" | "csv"
 ) {
-  const cacheKey = `${profileId}:${startDate?.getTime()}:${endDate?.getTime()}:${format}`;
+  const start = startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const end = endDate || new Date();
+
+  const cacheKey = `${profileId}:${start.toISOString()}:${end.toISOString()}:${format}`;
   const cached = analyticsCache.get(cacheKey);
 
   if (cached && isCacheValid(cached.timestamp)) {
     return cached.data;
   }
-
-  const start = startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const end = endDate || new Date();
 
   const transactions = await prisma.supportTransaction.findMany({
     where: {
