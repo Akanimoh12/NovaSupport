@@ -2320,7 +2320,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       })
       .optional()
       .nullable(),
-    stellarNetwork: z.string().default("TESTNET"),
+    stellarNetwork: z.string().default(process.env.INDEXER_NETWORK ?? "TESTNET"),
     supporterAddress: z.string().optional().nullable(),
     recipientAddress: z.string().min(1),
     profileId: z.string().min(1),
