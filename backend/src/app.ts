@@ -4176,9 +4176,12 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     if (!subscription) return sendError(res, 404, "Recurring support not found");
     if (subscription.supporterId !== user.id) return sendError(res, 403, "Forbidden");
 
-    await prisma.recurringSupport.delete({ where: { id: id as string } });
+    await prisma.recurringSupport.update({
+      where: { id: id as string },
+      data: { status: "cancelled", cancelledAt: new Date() },
+    });
 
-    return res.status(204).send();
+    return res.status(200).json({ ok: true });
   });
 
   /**
