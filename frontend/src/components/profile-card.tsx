@@ -175,7 +175,7 @@ export function ProfileCard({
               <img src={avatarUrl} alt={displayName} className="w-16 h-16 rounded-full object-cover" />
             ) : (
               <div className="w-16 h-16 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xl font-bold">
-                {displayName.slice(0, 2).toUpperCase()}
+                {(displayName?.slice(0, 2) || '?').toUpperCase()}
               </div>
             )}
             <div>
