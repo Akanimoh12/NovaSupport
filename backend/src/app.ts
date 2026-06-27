@@ -4253,10 +4253,14 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       const profile = await prisma.profile.findUnique({
         where: { username },
         include: {
-          supportTransactions: { select: { id: true } },
-          recurringSupports: { select: { id: true } },
-          milestones: { select: { id: true } },
-          webhooks: { select: { id: true } },
+          _count: {
+            select: {
+              supportTransactions: true,
+              recurringSupports: true,
+              milestones: true,
+              webhooks: true,
+            },
+          },
         },
       }) as any;
 
@@ -4274,10 +4278,10 @@ All errors return JSON with an \`error\` field and optional \`code\`:
         profileId: profile.id,
         userId: user.id,
         relatedRecords: {
-          transactions: profile.supportTransactions.length,
-          recurring: profile.recurringSupports.length,
-          milestones: profile.milestones.length,
-          webhooks: profile.webhooks.length,
+          transactions: profile._count.supportTransactions,
+          recurring: profile._count.recurringSupports,
+          milestones: profile._count.milestones,
+          webhooks: profile._count.webhooks,
         },
       }, "Profile deletion initiated");
 
