@@ -4129,7 +4129,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
   const patchRecurringSupportSchema = z.object({
     status: z.enum(["active", "paused", "cancelled"]).optional(),
     frequency: z.enum(["weekly", "monthly"]).optional(),
-    amount: z.string().min(1).optional(),
+    amount: z.string().regex(/^\d+(\.\d{1,7})?$/).refine(v => parseFloat(v) > 0).optional(),
   }).refine((data) => data.status || data.frequency || data.amount, {
     message: "At least one of status, frequency, or amount is required",
   });
