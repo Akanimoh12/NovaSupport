@@ -32,7 +32,7 @@ model Profile {
   websiteUrl                String?
   twitterHandle             String?
   githubHandle              String?
-  walletAddress             String
+  walletAddress             String                   @unique
   ownerId                   String
   viewCount                 Int                      @default(0)
   createdAt                 DateTime                 @default(now())
