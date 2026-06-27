@@ -2306,7 +2306,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       .refine(v => parseFloat(v) > 0, "amount must be greater than zero"),
     assetCode: z.string().min(1),
     assetIssuer: z.string().optional().nullable(),
-    status: z.string().default("pending"),
+    status: z.enum(["pending", "SUCCESS", "failed"]).default("pending"),
     message: z.string().max(280).optional().nullable(),
     memo: z
       .string()
