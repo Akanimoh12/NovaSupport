@@ -76,7 +76,12 @@ export async function deliverWebhook(
     return {
       status: "failed",
       error: `HTTP ${response.status}`,
-      willRetry: response.status >= 500 || response.status === 429,
+      willRetry:
+        response.status >= 500 ||
+        response.status === 429 ||
+        response.status === 401 ||
+        response.status === 403 ||
+        response.status === 408,
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

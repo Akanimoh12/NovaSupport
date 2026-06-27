@@ -257,7 +257,7 @@ export function ActivityFeed({ username, limit = 10 }: ActivityFeedProps) {
                         )}
                         {activity.metadata.txHash && (
                           <Link
-                            href={`https://stellar.expert/explorer/testnet/tx/${activity.metadata.txHash}`}
+                            href={`https://stellar.expert/explorer/${process.env.NEXT_PUBLIC_STELLAR_NETWORK === 'MAINNET' ? 'mainnet' : 'testnet'}/tx/${activity.metadata.txHash}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 text-xs text-white/70 hover:text-white/90 transition font-mono"

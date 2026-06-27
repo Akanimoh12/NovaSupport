@@ -2054,10 +2054,6 @@ All errors return JSON with an \`error\` field and optional \`code\`:
         return sendError(res, 403, "Forbidden: You do not own this profile");
       }
 
-      if (!profile) {
-        return sendError(res, 404, "Invalid or expired verification token", "TOKEN_INVALID");
-      }
-
       if (profile.emailVerificationExpiry && profile.emailVerificationExpiry < new Date()) {
         return sendError(res, 410, "Verification token has expired", "TOKEN_EXPIRED");
       }
