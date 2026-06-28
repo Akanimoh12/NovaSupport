@@ -319,7 +319,7 @@ export default async function ProfilePage({ params }: PageProps) {
                     className="flex items-center justify-between gap-4"
                   >
                     <span className="text-xs text-sky/70">#{entry.rank}</span>
-                    
+                    <a
                       href={stellarExpertUrl("account", entry.supporterAddress)}
                       target="_blank"
                       rel="noopener noreferrer"
