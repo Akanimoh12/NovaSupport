@@ -82,6 +82,10 @@ export function SupportPanel({
   const [frequency, setFrequency] = useState<"weekly" | "monthly">("monthly");
   const [sending, setSending] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
+  // Values captured at submit time so the result modal can keep displaying them
+  // after the live form fields are cleared (#708).
+  const [submittedAmount, setSubmittedAmount] = useState("");
+  const [submittedMessage, setSubmittedMessage] = useState("");
   const { showToast } = useToast();
 
   const handleCopy = useCallback(async () => {
@@ -163,6 +167,13 @@ export function SupportPanel({
       ) as Transaction | FeeBumpTransaction;
       const result = await horizonServer.submitTransaction(tx);
       setTxHash(result.hash);
+      // Snapshot the submitted values so the result modal keeps showing them,
+      // then clear the form fields. This prevents the user from accidentally
+      // re-sending the same amount/message once the modal closes (#708).
+      setSubmittedAmount(amount);
+      setSubmittedMessage(message);
+      setAmount("");
+      setMessage("");
 
       if (isRecurring && profileId) {
         await apiFetch(`${API_BASE_URL}/api/v1/recurring-support`, {
@@ -664,10 +675,10 @@ export function SupportPanel({
 
       <TransactionResultModal
         txHash={txHash}
-        amount={amount}
+        amount={submittedAmount}
         assetCode={paymentAsset.code || "XLM"}
         recipientDisplayName={recipientDisplayName}
-        note={message || null}
+        note={submittedMessage || null}
         isOpen={txHash !== null}
         onClose={() => setTxHash(null)}
       />
