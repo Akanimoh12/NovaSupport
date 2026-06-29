@@ -3,6 +3,8 @@
  * Provides a consistent interface across Freighter, Albedo, and Lobstr.
  */
 
+import { Networks } from "@stellar/stellar-sdk";
+
 export type WalletId = "freighter" | "albedo" | "lobstr";
 
 export type WalletErrorCode =
@@ -113,7 +115,11 @@ const albedoAdapter: WalletAdapter = {
   async signTransaction(xdr, { networkPassphrase }) {
     const albedo = (window as any).albedo;
     if (!albedo) throw new WalletError("Albedo extension not found.", "NOT_FOUND");
-    const result = await albedo.tx({ xdr, network: networkPassphrase });
+    // Albedo's tx() expects the shorthand "public" | "testnet", not the full
+    // network passphrase. Passing the passphrase makes every sign fail (#707).
+    const network =
+      networkPassphrase === Networks.PUBLIC ? "public" : "testnet";
+    const result = await albedo.tx({ xdr, network });
     if (!result?.signed_envelope_xdr)
       throw new WalletError("Albedo did not return a signed transaction.", "SIGNING_FAILED");
     return result.signed_envelope_xdr;
