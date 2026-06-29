@@ -51,7 +51,7 @@ export async function checkAndAwardBadges(profileId: string): Promise<void> {
           select: { supporterAddress: true },
         }),
         tx.supportTransaction.groupBy({
-          by: ["assetCode"],
+          by: ["assetCode", "assetIssuer"],
           where: { profileId, status: { not: "failed" } },
           _sum: { amount: true },
         }),
@@ -61,7 +61,7 @@ export async function checkAndAwardBadges(profileId: string): Promise<void> {
       ]);
 
       const xlmTotal = totalsByAsset
-        .filter((g) => g.assetCode === "XLM")
+        .filter((g) => g.assetCode === "XLM" && g.assetIssuer === null)
         .reduce((sum, g) => sum + Number(g._sum.amount ?? 0), 0);
 
       for (const badge of badges) {
