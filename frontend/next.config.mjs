@@ -14,6 +14,14 @@ const nextConfig = {
   async headers() {
     return [
       {
+        // Deny framing on all non-embed routes to mitigate clickjacking
+        source: "/((?!embed).*)",
+        headers: [
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+        ],
+      },
+      {
         // Allow cross-origin embedding of the embed widget pages
         source: "/embed/:path*",
         headers: [
