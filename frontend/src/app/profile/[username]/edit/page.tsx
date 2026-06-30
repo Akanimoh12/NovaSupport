@@ -64,6 +64,7 @@ export default function EditProfilePage() {
   const [ownershipChecked, setOwnershipChecked] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [walletPrompt, setWalletPrompt] = useState<"locked" | "not-owner" | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   const [form, setForm] = useState({
@@ -81,6 +82,8 @@ export default function EditProfilePage() {
   const [assetError, setAssetError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (ownershipChecked) return;
+
     async function init() {
       try {
         const res = await fetch(`${API_BASE_URL}/profiles/${username}`);
@@ -93,8 +96,14 @@ export default function EditProfilePage() {
         const result = await getAddress().catch(() => ({ address: "", error: "Freighter not available" }));
         const connectedAddress = "address" in result ? result.address : "";
 
-        if (!connectedAddress || connectedAddress !== profile.walletAddress) {
-          router.replace(`/profile/${username}`);
+        if (!connectedAddress) {
+          // Wallet not connected or Freighter is locked — show a prompt instead of silently redirecting
+          setWalletPrompt("locked");
+          return;
+        }
+
+        if (connectedAddress !== profile.walletAddress) {
+          setWalletPrompt("not-owner");
           return;
         }
 
@@ -120,7 +129,7 @@ export default function EditProfilePage() {
       }
     }
     init();
-  }, [username, router]);
+  }, [username, router, ownershipChecked]);
 
   function setField(field: keyof typeof form) {
     return (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -204,6 +213,55 @@ export default function EditProfilePage() {
       <AppShell>
         <div className="flex h-[60vh] items-center justify-center">
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-mint border-t-transparent" />
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (walletPrompt === "locked") {
+    return (
+      <AppShell>
+        <div className="flex h-[60vh] flex-col items-center justify-center gap-4 text-center px-4">
+          <div className="rounded-full bg-yellow-500/10 p-4 text-3xl">🔒</div>
+          <h2 className="text-xl font-bold text-white">Connect your wallet to edit this profile</h2>
+          <p className="text-sm text-steel max-w-sm">
+            Freighter is not connected or is locked. Unlock your Freighter wallet and try again.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setLoading(true);
+              setWalletPrompt(null);
+              // Re-run the init flow by resetting ownershipChecked
+              setOwnershipChecked(false);
+            }}
+            className="min-h-[44px] rounded-xl bg-mint px-6 text-sm font-bold text-ink hover:bg-mint/90 transition-colors"
+          >
+            Try again
+          </button>
+          <Link href={`/profile/${username}`} className="text-sm text-steel hover:text-white transition-colors">
+            ← Back to profile
+          </Link>
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (walletPrompt === "not-owner") {
+    return (
+      <AppShell>
+        <div className="flex h-[60vh] flex-col items-center justify-center gap-4 text-center px-4">
+          <div className="rounded-full bg-red-500/10 p-4 text-3xl">🚫</div>
+          <h2 className="text-xl font-bold text-white">Access denied</h2>
+          <p className="text-sm text-steel max-w-sm">
+            The connected wallet does not match this profile. Switch to the correct wallet in Freighter and try again.
+          </p>
+          <Link
+            href={`/profile/${username}`}
+            className="min-h-[44px] inline-flex items-center rounded-xl bg-white/10 px-6 text-sm font-bold text-white hover:bg-white/20 transition-colors"
+          >
+            ← Back to profile
+          </Link>
         </div>
       </AppShell>
     );
