@@ -38,7 +38,7 @@ type SupportTx = {
   assetCode: string;
   message?: string | null;
   createdAt: string;
-  senderAddress: string;
+  supporterAddress: string | null;
 };
 
 type Milestone = {
