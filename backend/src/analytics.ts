@@ -6,6 +6,7 @@ const analyticsCache = new Map<
   { data: any; timestamp: number }
 >();
 const CACHE_TTL = 3600000; // 1 hour
+const CACHE_MAX_SIZE = 1000;
 
 interface DailyContribution {
   date: string;
@@ -214,6 +215,12 @@ export async function getAnalytics(
   };
 
   analyticsCache.set(cacheKey, { data: result, timestamp: Date.now() });
+
+  // Evict oldest entries when the cache exceeds max size to prevent OOM
+  if (analyticsCache.size > CACHE_MAX_SIZE) {
+    const oldest = analyticsCache.keys().next().value;
+    if (oldest !== undefined) analyticsCache.delete(oldest);
+  }
 
   if (format === "csv") {
     return convertToCSV(result);
