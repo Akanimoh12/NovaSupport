@@ -32,7 +32,8 @@ function isAssetMatch(
 }
 
 // Scan the transaction's operations for a payment that matches all expected details.
-// Supports both `payment` and `create_account` (XLM-only) operation types.
+// Supports `payment`, `create_account` (XLM-only), `path_payment_strict_send`,
+// and `path_payment_strict_receive` operation types.
 async function validatePaymentDetails(
   server: Horizon.Server,
   txHash: string,
@@ -65,6 +66,38 @@ async function validatePaymentDetails(
         wantNative &&
         c.account === expected.recipientAddress &&
         parseFloat(c.starting_balance) === parseFloat(expected.amount)
+      ) {
+        return true;
+      }
+    }
+
+    // Path payments: the destination asset and amount received are what matter
+    // for the recipient, not the source asset the sender used.
+    if (
+      op.type === "path_payment_strict_send" ||
+      op.type === "path_payment_strict_receive"
+    ) {
+      const p = op as unknown as {
+        to: string;
+        // path_payment_strict_send: amount received by destination
+        destination_amount?: string;
+        // path_payment_strict_receive: the exact amount the destination receives
+        amount?: string;
+        asset_type: string;
+        asset_code?: string;
+        asset_issuer?: string;
+      };
+      // The received amount field differs between the two op types
+      const receivedAmount =
+        op.type === "path_payment_strict_receive"
+          ? p.amount
+          : p.destination_amount;
+
+      if (
+        p.to === expected.recipientAddress &&
+        receivedAmount !== undefined &&
+        parseFloat(receivedAmount) === parseFloat(expected.amount) &&
+        isAssetMatch(p, expected.assetCode, expected.assetIssuer)
       ) {
         return true;
       }
