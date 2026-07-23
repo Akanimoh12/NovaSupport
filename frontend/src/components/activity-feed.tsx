@@ -12,8 +12,8 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
+import { API_BASE_URL } from "@/lib/config";
+import { stellarExpertUrl } from "@/lib/stellar";
 
 type ActivityItem = {
   id: string;
@@ -120,13 +120,13 @@ export function ActivityFeed({ username, limit = 10 }: ActivityFeedProps) {
           id: `tx-${tx.id}`,
           type: "support",
           title: `Received ${tx.amount} ${tx.assetCode}`,
-          description: `Support from ${truncateHash(tx.senderAddress, 8)}`,
+          description: `Support from ${truncateHash(tx.supporterAddress ?? '', 8)}`,
           timestamp: tx.createdAt,
           icon: getActivityIcon("support"),
           metadata: {
             amount: tx.amount,
             assetCode: tx.assetCode,
-            supporter: tx.senderAddress,
+            supporter: tx.supporterAddress,
             txHash: tx.txHash,
           },
         });
@@ -257,7 +257,7 @@ export function ActivityFeed({ username, limit = 10 }: ActivityFeedProps) {
                         )}
                         {activity.metadata.txHash && (
                           <Link
-                            href={`https://stellar.expert/explorer/${process.env.NEXT_PUBLIC_STELLAR_NETWORK === 'MAINNET' ? 'mainnet' : 'testnet'}/tx/${activity.metadata.txHash}`}
+                            href={stellarExpertUrl('tx', activity.metadata.txHash)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 text-xs text-white/70 hover:text-white/90 transition font-mono"

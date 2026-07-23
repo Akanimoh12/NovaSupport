@@ -430,6 +430,12 @@ export default function CreatePage() {
                         key={asset}
                         type="button"
                         onClick={() => {
+                          const isSelected = assets.some((a) => a.code === asset);
+                          setAssets(
+                            isSelected
+                              ? assets.filter((a) => a.code !== asset)
+                              : [...assets, { code: asset, issuer: "" }]
+                          );
                           setForm((prev) => ({
                             ...prev,
                             acceptedAssets: prev.acceptedAssets.includes(asset)
@@ -438,7 +444,7 @@ export default function CreatePage() {
                           }));
                         }}
                         className={`rounded-xl border px-4 py-2 text-xs font-semibold transition ${
-                          form.acceptedAssets.includes(asset)
+                          assets.some((a) => a.code === asset)
                             ? "border-mint bg-mint/10 text-mint"
                             : "border-white/10 bg-white/5 text-steel hover:border-white/20"
                         }`}
