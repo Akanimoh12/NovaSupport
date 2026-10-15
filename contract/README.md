@@ -224,8 +224,8 @@ stellar contract invoke --network testnet-alt ...
    # Check contract support count
    stellar contract invoke --id <CONTRACT_ID> --network testnet -- support_count
 
-   # Check total by asset
-   stellar contract invoke --id <CONTRACT_ID> --network testnet -- get_total_by_asset --asset_code XLM
+   # Check total by asset for a recipient
+   stellar contract invoke --id <CONTRACT_ID> --network testnet -- get_total_by_asset --r <RECIPIENT_ADDRESS> --asset <ASSET_ADDRESS>
    ```
 
 4. **Test with Stellar Laboratory:**
@@ -511,7 +511,7 @@ The table below shows simulated resource consumption across representative scena
 
 1. **Message length** — The `message` parameter is stored in contract arguments and validated on-chain. Longer messages increase instruction count and transaction size slightly.
 2. **Token transfer** — `token::Client::transfer()` is the most expensive single operation. It invokes the Stellar Asset Contract (SAC), which reads and writes ledger entries for both the supporter and the contract balances.
-3. **Storage TTL extension** — Every `support()` call extends TTL for `SupportCount`, `RecipientCount`, `RecipientTotal`, and `TotalByAsset` entries, adding four ledger write operations.
+3. **Storage TTL extension** — Every `support()` call extends TTL for `SupportCount`, `RecipientCount`, and `RecipientTotal` entries, adding three ledger write operations.
 4. **First-time recipient** — If the recipient has no prior transactions with this contract, two storage entries are created instead of updated, slightly increasing cost.
 5. **Network congestion** — During high-traffic periods, the Soroban fee market may require a higher base fee for timely inclusion. Resource fees are unaffected by congestion.
 6. **Protocol upgrades** — Soroban fee schedules are governed by validators and can change between protocol versions.
