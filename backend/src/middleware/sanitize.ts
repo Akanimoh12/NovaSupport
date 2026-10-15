@@ -42,6 +42,10 @@ const SAFE_HTML: sanitizeHtml.IOptions = {
 };
 
 // Free-text user content fields where HTML should be stripped to prevent stored XSS
+// NOTE: Only fields present in Prisma schema / Zod schemas / route handlers.
+// Unused placeholders (social handles beyond twitter/github, contact/notification
+// emails, generic text/content/notes/tags/link keys) were removed to keep the
+// allowlist drift-free (see #1364).
 const HTML_CONTENT_FIELDS = new Set([
   "bio",
   "message",
@@ -49,12 +53,7 @@ const HTML_CONTENT_FIELDS = new Set([
   "displayName",
   "title",
   "name",
-  "text",
-  "content",
-  "notes",
   "username",
-  "tags_item", // For array items in query params
-  "tags", // For direct tags field
 ]);
 
 // URL fields that should be normalized and validated
@@ -63,30 +62,23 @@ const URL_FIELDS = new Set([
   "avatarUrl",
   "webhookUrl",
   "url",
-  "link",
 ]);
 
 // Social handle fields that need special validation
 const SOCIAL_HANDLE_FIELDS = new Set([
   "twitterHandle",
   "githubHandle",
-  "linkedinHandle",
-  "discordHandle",
 ]);
 
 // Email fields that need validation
 const EMAIL_FIELDS = new Set([
   "email",
-  "contactEmail",
-  "notificationEmail",
 ]);
 
 // Fields that should be converted to lowercase
 const LOWERCASE_FIELDS = new Set([
   "username",
   "email",
-  "contactEmail",
-  "notificationEmail",
 ]);
 
 // Maximum lengths for different field types
@@ -324,7 +316,7 @@ export function sanitizeString(
     }
 
     // Check for control characters (except newlines and tabs for some fields)
-    const allowNewlines = ["bio", "message", "description", "content"].includes(key);
+    const allowNewlines = ["bio", "message", "description"].includes(key);
     const controlCharRegex = allowNewlines ? /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g : /[\x00-\x08\x0B-\x1F\x7F]/g;
     if (controlCharRegex.test(result)) {
       violations.push("Control characters removed");
@@ -349,6 +341,7 @@ export function sanitizeString(
 export function sanitizeObject(
   obj: unknown,
   depth = 0,
+  parentKey?: string,
 ): { result: unknown; changed: boolean; violations: string[] } {
   const allViolations: string[] = [];
 
@@ -357,16 +350,27 @@ export function sanitizeObject(
   }
 
   if (Array.isArray(obj)) {
+    // Use the parent field's rules when it is a known field; otherwise fall
+    // back to "message" so unknown array fields still get HTML stripping
+    // instead of silently bypassing XSS protection.
+    const isKnownField =
+      parentKey !== undefined &&
+      (HTML_CONTENT_FIELDS.has(parentKey) ||
+        URL_FIELDS.has(parentKey) ||
+        SOCIAL_HANDLE_FIELDS.has(parentKey) ||
+        EMAIL_FIELDS.has(parentKey) ||
+        LOWERCASE_FIELDS.has(parentKey) ||
+        (MAX_LENGTHS as Record<string, unknown>)[parentKey] !== undefined);
+    const itemKey = isKnownField ? (parentKey as string) : "message";
     let changed = false;
     const result = obj.map((item, index) => {
       if (typeof item === "string") {
-        // Use a generic key so HTML sanitization still applies
-        const { result: r, changed: c, violations } = sanitizeString("message", item);
+        const { result: r, changed: c, violations } = sanitizeString(itemKey, item);
         if (c) changed = true;
         allViolations.push(...violations.map(v => `[${index}] ${v}`));
         return r;
       }
-      const { result: r, changed: c, violations } = sanitizeObject(item, depth + 1);
+      const { result: r, changed: c, violations } = sanitizeObject(item, depth + 1, parentKey);
       if (c) changed = true;
       allViolations.push(...violations.map(v => `[${index}] ${v}`));
       return r;
@@ -384,7 +388,7 @@ export function sanitizeObject(
         allViolations.push(...violations.map(v => `${key}: ${v}`));
         result[key] = r;
       } else {
-        const { result: r, changed: c, violations } = sanitizeObject(value, depth + 1);
+        const { result: r, changed: c, violations } = sanitizeObject(value, depth + 1, key);
         if (c) changed = true;
         allViolations.push(...violations.map(v => `${key}.${v}`));
         result[key] = r;
