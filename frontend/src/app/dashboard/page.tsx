@@ -102,6 +102,14 @@ export default function DashboardPage() {
   const [csvLoading, setCsvLoading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [embedCopied, setEmbedCopied] = useState(false);
+  const [trends, setTrends] = useState({
+    totalEarned: "—",
+    totalEarnedPositive: true,
+    totalSupporters: "—",
+    totalSupportersPositive: true,
+    totalTransactions: "—",
+    totalTransactionsPositive: true,
+  });
 
   useEffect(() => {
     async function loadDashboard() {
@@ -158,6 +166,83 @@ export default function DashboardPage() {
 
     loadDashboard();
   }, [router]);
+
+  // Fetch two consecutive 30-day periods and compute period-over-period trends (#1233)
+  useEffect(() => {
+    if (!username) return;
+
+    async function fetchTrends() {
+      try {
+        const now = new Date();
+        const periodEnd = now.toISOString();
+        const periodStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+        const prevStart = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000).toISOString();
+
+        const [currRes, prevRes] = await Promise.all([
+          apiFetch(
+            `${API_BASE_URL}/profiles/${username}/analytics/timeseries?period=daily&from=${encodeURIComponent(periodStart)}&to=${encodeURIComponent(periodEnd)}`,
+          ),
+          apiFetch(
+            `${API_BASE_URL}/profiles/${username}/analytics/timeseries?period=daily&from=${encodeURIComponent(prevStart)}&to=${encodeURIComponent(periodStart)}`,
+          ),
+        ]);
+
+        if (!currRes.ok || !prevRes.ok) return;
+
+        const [currJson, prevJson] = (await Promise.all([
+          currRes.json(),
+          prevRes.json(),
+        ])) as [
+          { data?: Array<{ amount: string; count: number; uniqueContributors: number }> },
+          { data?: Array<{ amount: string; count: number; uniqueContributors: number }> },
+        ];
+
+        const sum = (
+          arr: Array<{ amount: string; count: number; uniqueContributors: number }>,
+          key: "amount" | "count" | "uniqueContributors",
+        ) =>
+          arr.reduce(
+            (acc, d) => acc + (key === "amount" ? Number(d.amount) : key === "count" ? d.count : d.uniqueContributors),
+            0,
+          );
+
+        const currAmount = sum(currJson.data ?? [], "amount");
+        const prevAmount = sum(prevJson.data ?? [], "amount");
+        const currCount = sum(currJson.data ?? [], "count");
+        const prevCount = sum(prevJson.data ?? [], "count");
+        const currSupporters = sum(currJson.data ?? [], "uniqueContributors");
+        const prevSupporters = sum(prevJson.data ?? [], "uniqueContributors");
+
+        function formatTrend(curr: number, prev: number): { label: string; positive: boolean } {
+          if (prev === 0)
+            return curr === 0
+              ? { label: "No change", positive: true }
+              : { label: "+100%", positive: true };
+          const pct = ((curr - prev) / prev) * 100;
+          if (pct === 0) return { label: "No change", positive: true };
+          const sign = pct > 0 ? "+" : "";
+          return { label: `${sign}${pct.toFixed(1)}%`, positive: pct >= 0 };
+        }
+
+        const earnedTrend = formatTrend(currAmount, prevAmount);
+        const supportersTrend = formatTrend(currSupporters, prevSupporters);
+        const txTrend = formatTrend(currCount, prevCount);
+
+        setTrends({
+          totalEarned: earnedTrend.label,
+          totalEarnedPositive: earnedTrend.positive,
+          totalSupporters: supportersTrend.label,
+          totalSupportersPositive: supportersTrend.positive,
+          totalTransactions: txTrend.label,
+          totalTransactionsPositive: txTrend.positive,
+        });
+      } catch {
+        // leave defaults ("—")
+      }
+    }
+
+    fetchTrends();
+  }, [username]);
 
   const handleAddMilestone = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -474,22 +559,22 @@ export default function DashboardPage() {
               title="Total Earned" 
               value={`${stats.totalEarned.toLocaleString(undefined, { maximumFractionDigits: 2 })} XLM`}
               icon={<Wallet className="text-mint" />}
-              trend="+12.5%"
-              positive={true}
+              trend={trends.totalEarned}
+              positive={trends.totalEarnedPositive}
             />
             <StatCard 
               title="Total Supporters" 
               value={stats.uniqueSupporters.toString()}
               icon={<Users className="text-sky" />}
-              trend="+8"
-              positive={true}
+              trend={trends.totalSupporters}
+              positive={trends.totalSupportersPositive}
             />
             <StatCard 
               title="Total Transactions" 
               value={stats.totalTransactions.toString()}
               icon={<Activity className="text-gold" />}
-              trend="Stable"
-              positive={true}
+              trend={trends.totalTransactions}
+              positive={trends.totalTransactionsPositive}
             />
           </div>
         )}
@@ -1022,9 +1107,11 @@ function StatCard({ title, value, icon, trend, positive }: {
           {icon}
         </div>
         <div className={`flex items-center gap-1 text-[10px] font-bold uppercase tracking-tight ${
-          positive ? "text-mint" : trend === "Stable" ? "text-steel" : "text-red-400"
+          trend === "—" || trend === "No change" ? "text-steel" : positive ? "text-mint" : "text-red-400"
         }`}>
-          {positive ? <ArrowUpRight size={14} /> : trend === "Stable" ? null : <ArrowDownRight size={14} />}
+          {trend !== "—" && trend !== "No change" && (
+            positive ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />
+          )}
           {trend}
         </div>
       </div>
