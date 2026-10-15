@@ -149,11 +149,15 @@ jobs:
           echo "| Deployed by | ${{ github.actor }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Explorer | [View on Stellar Expert](https://stellar.expert/explorer/${{ env.NETWORK }}/contract/${{ steps.deploy.outputs.contract_id }}) |" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Update CONTRACT_ID secret via GitHub API
+      - name: Update network-scoped CONTRACT_ID secret via GitHub API
         env:
           GH_TOKEN: ${{ secrets.GH_PAT_UPDATE_SECRETS }}
           CONTRACT_ID: ${{ steps.deploy.outputs.contract_id }}
+          NETWORK: ${{ env.NETWORK }}
         run: |
+          NETWORK_UPPER=$(echo "$NETWORK" | tr '[:lower:]' '[:upper:]')
+          SECRET_NAME="NEXT_PUBLIC_CONTRACT_ID_${NETWORK_UPPER}"
+
           # Fetch the repo public key for secret encryption
           PUB_KEY_RESP=$(curl -sS \
             -H "Authorization: Bearer $GH_TOKEN" \
@@ -163,13 +167,13 @@ jobs:
           KEY_ID=$(echo "$PUB_KEY_RESP" | grep '"key_id"' | sed 's/.*: "\(.*\)".*/\1/')
           PUB_KEY=$(echo "$PUB_KEY_RESP" | grep '"key"' | sed 's/.*: "\(.*\)".*/\1/')
 
-          # Use Python (available on ubuntu-latest) to encrypt with libsodium
+          # Use Python (available on ubuntu-latest) to encrypt with libsodium using pinned PyNaCl
           ENCRYPTED=$(PUB_KEY="$PUB_KEY" CONTRACT_ID="$CONTRACT_ID" python3 - <<'EOF'
           import base64, os, sys
 
-          # Use PyNaCl for sealed box encryption (matches GitHub's requirement)
+          # Use PyNaCl for sealed box encryption (matches GitHub's requirement, pinned version)
           import subprocess
-          subprocess.check_call(["pip", "install", "PyNaCl", "-q"])
+          subprocess.check_call(["pip", "install", "PyNaCl==1.5.0", "-q"])
           import nacl.encoding, nacl.public
 
           pub_key_bytes = base64.b64decode(os.environ["PUB_KEY"])
@@ -180,14 +184,45 @@ jobs:
           EOF
           )
 
-          # Update the secret
+          # Update the distinctly-named repository secret per network
           curl -sS -X PUT \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/secrets/NEXT_PUBLIC_CONTRACT_ID" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/secrets/$SECRET_NAME" \
             -d "{\"encrypted_value\":\"$ENCRYPTED\",\"key_id\":\"$KEY_ID\"}"
 
-          echo "CONTRACT_ID secret updated successfully"
+          echo "$SECRET_NAME secret updated successfully"
+
+          # Also attempt updating the environment-scoped secret if environment is configured
+          ENV_PUB_KEY_RESP=$(curl -sS \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repositories/${{ github.repository_id }}/environments/$NETWORK/secrets/public-key" || true)
+
+          ENV_KEY_ID=$(echo "$ENV_PUB_KEY_RESP" | grep '"key_id"' | sed 's/.*: "\(.*\)".*/\1/')
+          ENV_PUB_KEY=$(echo "$ENV_PUB_KEY_RESP" | grep '"key"' | sed 's/.*: "\(.*\)".*/\1/')
+
+          if [ -n "$ENV_KEY_ID" ] && [ -n "$ENV_PUB_KEY" ]; then
+            ENV_ENCRYPTED=$(PUB_KEY="$ENV_PUB_KEY" CONTRACT_ID="$CONTRACT_ID" python3 - <<'EOF'
+            import base64, os, sys
+            import nacl.encoding, nacl.public
+
+            pub_key_bytes = base64.b64decode(os.environ["PUB_KEY"])
+            pub_key = nacl.public.PublicKey(pub_key_bytes)
+            sealed = nacl.public.SealedBox(pub_key)
+            encrypted = sealed.encrypt(os.environ["CONTRACT_ID"].encode())
+            print(base64.b64encode(encrypted).decode())
+            EOF
+            )
+
+            curl -sS -X PUT \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repositories/${{ github.repository_id }}/environments/$NETWORK/secrets/NEXT_PUBLIC_CONTRACT_ID" \
+              -d "{\"encrypted_value\":\"$ENV_ENCRYPTED\",\"key_id\":\"$ENV_KEY_ID\"}"
+
+            echo "Environment-scoped NEXT_PUBLIC_CONTRACT_ID for $NETWORK updated successfully"
+          fi
 
   notify-success:
     name: Notify deployment success
