@@ -54,11 +54,11 @@ jobs:
           retention-days: 1
 
   deploy:
-    name: Deploy to testnet
+    name: Deploy to ${{ github.event.inputs.network || 'testnet' }}
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: testnet
+    environment: ${{ github.event.inputs.network || 'testnet' }}
 
     outputs:
       network: ${{ env.NETWORK }}
@@ -66,9 +66,9 @@ jobs:
 
     env:
       NETWORK: ${{ github.event.inputs.network || 'testnet' }}
-      STELLAR_NETWORK_PASSPHRASE: "Test SDF Network ; September 2015"
-      SOROBAN_RPC_URL: "https://soroban-testnet.stellar.org"
-      HORIZON_URL: "https://horizon-testnet.stellar.org"
+      STELLAR_NETWORK_PASSPHRASE: ${{ github.event.inputs.network == 'mainnet' && 'Public Global Stellar Network ; September 2015' || 'Test SDF Network ; September 2015' }}
+      SOROBAN_RPC_URL: ${{ github.event.inputs.network == 'mainnet' && 'https://soroban-mainnet.stellar.org' || 'https://soroban-testnet.stellar.org' }}
+      HORIZON_URL: ${{ github.event.inputs.network == 'mainnet' && 'https://horizon.stellar.org' || 'https://horizon-testnet.stellar.org' }}
 
     steps:
       - name: Check out repository
@@ -91,7 +91,7 @@ jobs:
           stellar network add \
             --rpc-url "$SOROBAN_RPC_URL" \
             --network-passphrase "$STELLAR_NETWORK_PASSPHRASE" \
-            testnet || true
+            "$NETWORK" || true
 
       - name: Import deployer identity
         run: |
@@ -109,7 +109,7 @@ jobs:
           CONTRACT_ID=$(stellar contract deploy \
             --wasm wasm/support_page.wasm \
             --source deployer \
-            --network testnet \
+            --network "$NETWORK" \
             --ignore-checks 2>&1 | tail -1)
 
           echo "contract_id=$CONTRACT_ID" >> "$GITHUB_OUTPUT"
@@ -120,7 +120,7 @@ jobs:
           stellar contract invoke \
             --id "${{ steps.deploy.outputs.contract_id }}" \
             --source deployer \
-            --network testnet \
+            --network "$NETWORK" \
             -- initialize \
             --admin "${{ secrets.STELLAR_ADMIN_ADDRESS }}"
 
@@ -130,7 +130,7 @@ jobs:
           COUNT=$(stellar contract invoke \
             --id "${{ steps.deploy.outputs.contract_id }}" \
             --source deployer \
-            --network testnet \
+            --network "$NETWORK" \
             -- support_count 2>&1 | tail -1)
 
           echo "support_count=$COUNT" >> "$GITHUB_OUTPUT"
@@ -147,7 +147,7 @@ jobs:
           echo "| Support Count | ${{ steps.verify.outputs.support_count }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Commit | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Deployed by | ${{ github.actor }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Explorer | [View on Stellar Expert](https://stellar.expert/explorer/testnet/contract/${{ steps.deploy.outputs.contract_id }}) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Explorer | [View on Stellar Expert](https://stellar.expert/explorer/${{ env.NETWORK }}/contract/${{ steps.deploy.outputs.contract_id }}) |" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Update CONTRACT_ID secret via GitHub API
         env:
