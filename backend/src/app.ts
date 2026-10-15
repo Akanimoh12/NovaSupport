@@ -582,6 +582,52 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     next();
   });
 
+  // ── Stellar TOML (#514) ──────────────────────────────────────────────
+  // Registered BEFORE the global cors() middleware. The Stellar spec requires
+  // this endpoint to be publicly accessible from any origin — browser-based
+  // wallets and federation resolvers send arbitrary Origin headers that are
+  // not on this app's allowlist. Registering after cors() causes the global
+  // middleware to reject those cross-origin requests before the route's own
+  // Access-Control-Allow-Origin: * header can apply (#1223).
+  // Spec: https://developers.stellar.org/docs/learn/encyclopedia/network-configuration/stellar-toml
+  let tomlCache: { body: string; expiresAt: number } | null = null;
+
+  app.get("/.well-known/stellar.toml", federationLimiter, async (_req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Cache-Control", "public, max-age=60");
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+
+    const now = Date.now();
+    if (tomlCache && now < tomlCache.expiresAt) {
+      return res.send(tomlCache.body);
+    }
+
+    try {
+      const profiles = await prisma.profile.findMany({
+        select: { walletAddress: true },
+        take: 10_000,
+      });
+
+      const accountLines = profiles
+        .map((p) => `[[ACCOUNTS]]\naddress = "${p.walletAddress}"`)
+        .join("\n\n");
+
+      const body = [
+        `NETWORK_PASSPHRASE="${process.env.STELLAR_NETWORK === 'PUBLIC'
+          ? 'Public Global Stellar Network ; September 2015'
+          : 'Test SDF Network ; September 2015'}"`,
+        `FEDERATION_SERVER="https://api.novasupport.xyz/federation"`,
+        ``,
+        accountLines || `# no accounts yet`,
+      ].join("\n");
+
+      tomlCache = { body, expiresAt: now + 60_000 };
+      return res.send(body);
+    } catch {
+      return res.status(500).send("# Internal server error");
+    }
+  });
+
   app.use(
     cors({
       origin: (origin, callback) => {
@@ -627,7 +673,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
   }
   app.use(globalLimiter);
 
-  // ── Swagger docs (#1192: registered after global middleware) ──────────
+  // ── Swagger docs ──────────────────────────────────────────────────────
   app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
   app.get("/docs.json", (req, res) => {
     const dynamicSpec = {
@@ -641,47 +687,6 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       ]
     };
     res.json(dynamicSpec);
-  });
-
-  // ── Stellar TOML (#514, #1192: registered after global middleware) ────
-  // Required by Stellar wallets and federation resolvers.
-  // Spec: https://developers.stellar.org/docs/learn/encyclopedia/network-configuration/stellar-toml
-  let tomlCache: { body: string; expiresAt: number } | null = null;
-
-  app.get("/.well-known/stellar.toml", federationLimiter, async (_req, res) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Cache-Control", "public, max-age=60");
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
-
-    const now = Date.now();
-    if (tomlCache && now < tomlCache.expiresAt) {
-      return res.send(tomlCache.body);
-    }
-
-    try {
-      const profiles = await prisma.profile.findMany({
-        select: { walletAddress: true },
-        take: 10_000,
-      });
-
-      const accountLines = profiles
-        .map((p) => `[[ACCOUNTS]]\naddress = "${p.walletAddress}"`)
-        .join("\n\n");
-
-      const body = [
-        `NETWORK_PASSPHRASE="${process.env.STELLAR_NETWORK === 'PUBLIC'
-          ? 'Public Global Stellar Network ; September 2015'
-          : 'Test SDF Network ; September 2015'}"`,
-        `FEDERATION_SERVER="https://api.novasupport.xyz/federation"`,
-        ``,
-        accountLines || `# no accounts yet`,
-      ].join("\n");
-
-      tomlCache = { body, expiresAt: now + 60_000 };
-      return res.send(body);
-    } catch {
-      return res.status(500).send("# Internal server error");
-    }
   });
 
   // ── API-Version header on every response ──────────────────────────────
@@ -1175,8 +1180,10 @@ All errors return JSON with an \`error\` field and optional \`code\`:
         // avoid loading unbounded rows into memory (#790). A production-grade
         // solution should use a precomputed totalSupported column incremented
         // transactionally. The take cap is a safe short-term mitigation.
+        // Use combinedWhere (search + asset filter) so the capped candidate
+        // set is consistent with the total count query below (#1226).
         const profiles = await prisma.profile.findMany({
-          where,
+          where: combinedWhere,
           take: 1000,
           select: {
             id: true,
