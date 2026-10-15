@@ -18,7 +18,7 @@
     "db:setup": "npm run db:generate && npm run db:migrate && npm run db:seed",
     "db:reset": "prisma migrate reset --force",
     "db:seed": "tsx prisma/seed.ts",
-    "lint": "eslint src/"
+    "lint": "eslint src/ --max-warnings=0"
   },
   "dependencies": {
     "@opentelemetry/auto-instrumentations-node": "0.60.1",
