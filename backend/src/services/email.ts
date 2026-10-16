@@ -50,3 +50,34 @@ export async function sendSupportReceivedEmail({
     html,
   });
 }
+
+interface SendMilestoneReachedEmailParams {
+  to: string;
+  milestoneName: string;
+  targetAmount: string;
+  assetCode: string;
+}
+
+export async function sendMilestoneReachedEmail({
+  to,
+  milestoneName,
+  targetAmount,
+  assetCode,
+}: SendMilestoneReachedEmailParams): Promise<void> {
+  const subject = `Milestone reached: ${milestoneName}`;
+
+  const html = `
+    <h2>Congratulations! You've reached a milestone! 🎉</h2>
+    <p>Your milestone "<strong>${escapeHtml(milestoneName)}</strong>" has been reached!</p>
+    <p>Target: <strong>${escapeHtml(targetAmount)} ${escapeHtml(assetCode)}</strong></p>
+    <p>Thank you for your dedication and the support from your community.</p>
+    <br/>
+    <p>Keep up the great work!<br/>The NovaSupport Team</p>
+  `;
+
+  await sendEmail({
+    to,
+    subject,
+    html,
+  });
+}
