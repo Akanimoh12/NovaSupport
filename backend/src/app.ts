@@ -117,6 +117,17 @@ function createPrismaCircuitBreakerStorage(name: string): CircuitBreakerStorage 
         },
       });
     },
+    async claimHalfOpen(nextAttempt) {
+      const result = await prisma.circuitBreakerState.updateMany({
+        where: {
+          name,
+          state: "OPEN",
+          nextAttemptAt: { lte: new Date(nextAttempt) },
+        },
+        data: { state: "HALF_OPEN" },
+      });
+      return result.count === 1;
+    },
   };
 }
 const rawHorizonFailureThreshold = process.env.HORIZON_CIRCUIT_BREAKER_THRESHOLD
@@ -1716,7 +1727,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
         z
           .object({
             code: z.string().min(1).max(12),
-            issuer: z.string().optional(),
+            issuer: stellarAddress.optional(),
           })
           .refine(
             (asset) =>
@@ -1968,7 +1979,6 @@ All errors return JSON with an \`error\` field and optional \`code\`:
   const updateProfileSchema = z.object({
     displayName: z.string().min(1).max(64).optional(),
     bio: z.string().max(280).optional(),
-    avatarUrl: z.string().url().optional().nullable(),
     email: z.string().email().optional().nullable(),
     websiteUrl: z.string().url().startsWith("https://").optional().nullable(),
     twitterHandle: z
@@ -2479,7 +2489,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
         z
           .object({
             code: z.string().regex(/^[A-Z]{1,12}$/),
-            issuer: z.string().optional(),
+            issuer: stellarAddress.optional(),
           })
           .refine(
             (asset) =>
@@ -2607,7 +2617,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       .regex(/^\d+(\.\d{1,7})?$/, "amount must be a positive decimal with up to 7 decimal places")
       .refine(v => parseFloat(v) > 0, "amount must be greater than zero"),
     assetCode: z.string().min(1).max(12),
-    assetIssuer: z.string().optional().nullable(),
+    assetIssuer: stellarAddress.optional().nullable(),
     status: z.enum(["pending", "SUCCESS", "failed"]).default("pending"),
     message: z.string().max(280).optional().nullable(),
     memo: z
@@ -4268,7 +4278,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       .regex(/^\d+(\.\d{1,7})?$/, "Must be a positive decimal with up to 7 places")
       .refine((v) => parseFloat(v) > 0, "Must be greater than zero"),
     assetCode: z.string().default("XLM"),
-    assetIssuer: z.string().optional().nullable(),
+    assetIssuer: stellarAddress.optional().nullable(),
   });
 
   v1Router.post("/profiles/:username/milestones", requireAuth, writeLimiter, async (req, res) => {
@@ -4691,7 +4701,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     profileId:   z.string().min(1),
     amount:      z.string().regex(/^\d+(\.\d{1,7})?$/, "amount must be a positive decimal with up to 7 decimal places").refine(v => parseFloat(v) > 0, "amount must be greater than zero"),
     assetCode:   z.string().min(1).max(12).optional().default("XLM"),
-    assetIssuer: z.string().optional().nullable(),
+    assetIssuer: stellarAddress.optional().nullable(),
     frequency:   z.enum(["weekly", "monthly"]),
   });
 
@@ -4808,7 +4818,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     status: z.enum(["active", "paused", "cancelled"]).optional(),
     frequency: z.enum(["weekly", "monthly"]).optional(),
     amount: z.string().regex(/^\d+(\.\d{1,7})?$/).refine(v => parseFloat(v) > 0).optional(),
-    assetIssuer: z.string().optional().nullable(),
+    assetIssuer: stellarAddress.optional().nullable(),
   }).refine((data) => data.status || data.frequency || data.amount || data.assetIssuer !== undefined, {
     message: "At least one field to update is required",
   });

@@ -12,6 +12,7 @@ export type CircuitBreakerSnapshot = {
 export type CircuitBreakerStorage = {
   load(): Promise<CircuitBreakerSnapshot | null>;
   save(snapshot: CircuitBreakerSnapshot): Promise<void>;
+  claimHalfOpen?: (nextAttempt: number) => Promise<boolean>;
 };
 
 export class CircuitBreaker {
@@ -53,7 +54,14 @@ export class CircuitBreaker {
         await this.refreshFromStorage();
         if (this.state === "OPEN") {
           if (Date.now() >= this.nextAttempt) {
-            await this.setState("HALF_OPEN");
+            const claimed = this.storage?.claimHalfOpen
+              ? await this.storage.claimHalfOpen(this.nextAttempt)
+              : true;
+            if (!claimed) {
+              await this.refreshFromStorage();
+              throw new Error("Circuit breaker is OPEN");
+            }
+            this.state = "HALF_OPEN";
             Metrics.circuitBreakerState("HALF_OPEN");
             logger.info("Circuit breaker state: HALF_OPEN");
           } else {
