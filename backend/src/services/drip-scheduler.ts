@@ -67,23 +67,8 @@ export async function processDueRecurringSupports(prismaClient = prisma, now = n
             : addMonths(nextRunAt, 1);
       }
 
-      // Atomic claim: only one scheduler instance wins the row
-      const claimed = await prismaClient.$executeRaw`
-        UPDATE "RecurringSupport"
-        SET "nextRunAt" = ${nextRunAt}
-        WHERE id = ${support.id} AND "nextRunAt" <= ${now}
-      `;
-
-      if (claimed === 0) {
-        logger.info({ dripId: support.id }, "Recurring support already claimed by another process");
-        continue;
-      }
-
-      await prismaClient.recurringSupportExecution.create({
-        data: {
-          recurringSupportId: support.id,
-          status: "pending",
-        },
+      // Atomically create the execution and claim the subscription in a single
+      // transaction so concurrent scheduler instances cannot double-process.
       await prismaClient.$transaction(async (transaction) => {
         await transaction.recurringSupportExecution.create({
           data: {

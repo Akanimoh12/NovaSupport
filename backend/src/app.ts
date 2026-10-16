@@ -52,6 +52,11 @@ import {
 import { checkAndAwardBadges } from "./services/badge-awarder.js";
 import { getMetricsText } from "./metrics.js";
 import { validateWebhookUrl } from "./utils/url-validator.js";
+import {
+  resolveStellarNetwork,
+  stellarNetworkLabel,
+  stellarNetworkPassphrase,
+} from "./network.js";
 
 // Extend Express Request to include auth context
 declare global {
@@ -624,9 +629,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
         .join("\n\n");
 
       const body = [
-        `NETWORK_PASSPHRASE="${process.env.STELLAR_NETWORK === 'PUBLIC'
-          ? 'Public Global Stellar Network ; September 2015'
-          : 'Test SDF Network ; September 2015'}"`,
+        `NETWORK_PASSPHRASE="${stellarNetworkPassphrase()}"`,
         `FEDERATION_SERVER="https://api.novasupport.xyz/federation"`,
         ``,
         accountLines || `# no accounts yet`,
@@ -791,7 +794,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     res.status(criticalServicesHealthy ? 200 : 503).json({
       ok: criticalServicesHealthy,
       service: "NovaSupport backend",
-      network: process.env.STELLAR_NETWORK === "PUBLIC" ? "Stellar Mainnet" : "Stellar Testnet",
+      network: stellarNetworkLabel(),
       timestamp: new Date().toISOString(),
       checks,
     });
@@ -2638,7 +2641,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       })
       .optional()
       .nullable(),
-    stellarNetwork: z.string().default(process.env.INDEXER_NETWORK ?? "TESTNET"),
+    stellarNetwork: z.string().default(resolveStellarNetwork()),
     supporterAddress: z.string().optional().nullable(),
     recipientAddress: z.string().min(1),
     profileId: z.string().min(1),
@@ -3051,8 +3054,6 @@ All errors return JSON with an \`error\` field and optional \`code\`:
 
     const profile = await resolveProfileOwner(req.params.username as string, req.auth, res);
     if (!profile) return;
-      const profile = await resolveProfileOwner(req.params.username as string, req.auth, res);
-      if (!profile) return;
 
       const result = await prisma.$transaction(
         async (tx) => {
@@ -3274,7 +3275,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       process.env.CONTRACT_ID ??
       process.env.NEXT_PUBLIC_CONTRACT_ID ??
       "";
-    const network = process.env.INDEXER_NETWORK ?? "TESTNET";
+    const network = resolveStellarNetwork();
 
     if (!contractId) {
       return res.json({

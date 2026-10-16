@@ -195,6 +195,7 @@ test("processDueRecurringSupports continues processing after individual failure"
     return Promise.resolve(1);
   });
 
+  const executionCreate = mock.fn(() => Promise.resolve({}));
   const mockPrisma = {
     recurringSupport: {
       findMany: mock.fn(() =>
@@ -202,8 +203,16 @@ test("processDueRecurringSupports continues processing after individual failure"
       ),
       update: mock.fn(() => Promise.resolve({})),
     },
-    recurringSupportExecution: { create: mock.fn(() => Promise.resolve({})) },
+    recurringSupportExecution: { create: executionCreate },
     $executeRaw,
+    // The claim runs inside $transaction (see buildPrismaMock), so a mock that
+    // omits it would throw before ever reaching $executeRaw.
+    $transaction: mock.fn(async (callback: (transaction: unknown) => Promise<unknown>) =>
+      callback({
+        recurringSupportExecution: { create: executionCreate },
+        $executeRaw,
+      }),
+    ),
   };
 
   await processDueRecurringSupports(mockPrisma as any);

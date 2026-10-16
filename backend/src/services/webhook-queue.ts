@@ -19,11 +19,40 @@ export interface WebhookJobData {
   payload: Record<string, unknown>;
 }
 
-export function createWebhookQueue(): Queue | null {
-  if (!getIsRedisAvailable()) return null;
+type QueueOptions = ConstructorParameters<typeof Queue>[1];
+type WorkerProcessor = ConstructorParameters<typeof Worker>[1];
+type WorkerOptions = ConstructorParameters<typeof Worker>[2];
 
+/**
+ * Optional seams so the re-entrancy guard can be exercised without a live
+ * Redis/BullMQ instance. Production callers omit them.
+ */
+export interface WebhookQueueDependencies {
+  isRedisAvailable?: () => boolean;
+  createQueue?: (name: string, options: QueueOptions) => Queue;
+}
+
+export interface WebhookWorkerDependencies {
+  isRedisAvailable?: () => boolean;
+  createWorker?: (name: string, processor: WorkerProcessor, options: WorkerOptions) => Worker;
+}
+
+export function createWebhookQueue(
+  dependencies: WebhookQueueDependencies = {},
+): Queue | null {
+  const isRedisAvailable = dependencies.isRedisAvailable ?? getIsRedisAvailable;
+  if (!isRedisAvailable()) return null;
+
+  // Re-entrancy guard: a second call must not overwrite the existing queue.
+  // Overwriting the module-level reference would leak the previous instance's
+  // Redis connections, which are never closed. Return the live instance so
+  // callers are idempotent (#1352).
+  if (queue) return queue;
+
+  const buildQueue =
+    dependencies.createQueue ?? ((name, options) => new Queue(name, options));
   const redis = getRedisClient()!;
-  queue = new Queue(QUEUE_NAME, {
+  queue = buildQueue(QUEUE_NAME, {
     connection: redis,
     defaultJobOptions: {
       attempts: 1,
@@ -72,14 +101,26 @@ export async function enqueueWebhookDelivery(deliveryId: string): Promise<void> 
   logger.debug({ deliveryId, webhookId: delivery.webhookId }, "Webhook delivery enqueued");
 }
 
-export function createWebhookWorker(): Worker | null {
-  if (!getIsRedisAvailable()) return null;
+export function createWebhookWorker(
+  dependencies: WebhookWorkerDependencies = {},
+): Worker | null {
+  const isRedisAvailable = dependencies.isRedisAvailable ?? getIsRedisAvailable;
+  if (!isRedisAvailable()) return null;
 
+  // Re-entrancy guard: a second call must not overwrite the existing worker.
+  // The previous Worker keeps consuming jobs concurrently with the new one and
+  // its connections are never closed, so return the live instance instead
+  // (#1352).
+  if (worker) return worker;
+
+  const buildWorker =
+    dependencies.createWorker ??
+    ((name, processor, options) => new Worker(name, processor, options));
   const redis = getRedisClient()!;
-  worker = new Worker(
+  worker = buildWorker(
     QUEUE_NAME,
     async (job) => {
-      const { deliveryId, url, signingKey, payload } = job.data as WebhookJobData;
+      const { deliveryId, webhookId, url, signingKey, payload } = job.data as WebhookJobData;
 
       // Atomically claim the row
       const claimed = await prisma.webhookDelivery.updateMany({
@@ -104,7 +145,7 @@ export function createWebhookWorker(): Worker | null {
           },
         });
         logger.info(
-          { deliveryId, webhookId: job.data.webhookId, statusCode: result.statusCode },
+          { deliveryId, webhookId, statusCode: result.statusCode },
           "Webhook delivered successfully",
         );
         Metrics.webhooksDelivered();
@@ -133,7 +174,7 @@ export function createWebhookWorker(): Worker | null {
         logger.warn(
           {
             deliveryId,
-            webhookId: job.data.webhookId,
+            webhookId,
             attempt: nextAttempt,
             nextRetryAt,
             error: result.error,
