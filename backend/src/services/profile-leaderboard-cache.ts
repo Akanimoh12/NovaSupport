@@ -1,4 +1,5 @@
-import { getRedisClient, getIsRedisAvailable } from "./redis.js";
+import { getRedisClient, getRedisSubscriber, getIsRedisAvailable } from "./redis.js";
+import { logger } from "../logger.js";
 
 export type LeaderboardSort = "total_amount" | "transaction_count";
 
@@ -24,10 +25,54 @@ type CachedLeaderboard = {
 };
 
 const CACHE_TTL_SECONDS = 5 * 60;
+// The in-process fallback is only populated when a Redis op failed, so it cannot
+// be invalidated by other replicas. Keep its TTL short so a replica that missed
+// a broadcast cannot serve a stale leaderboard for long (#1350).
+const FALLBACK_CACHE_TTL_SECONDS = 30;
 const CACHE_KEY_PREFIX = "lb:";
+const INVALIDATION_CHANNEL = "lb:invalidate";
 
 // In-process fallback cache
 const leaderboardCache = new Map<string, CachedLeaderboard>();
+
+let invalidationSubscriptionStarted = false;
+
+/**
+ * Listen for invalidation broadcasts from other replicas so their local
+ * fallback caches are dropped too. Idempotent and best-effort: if Redis or the
+ * subscriber is unavailable, the short fallback TTL is the backstop.
+ */
+function ensureInvalidationSubscription(): void {
+  if (invalidationSubscriptionStarted) return;
+
+  const subscriber = getRedisSubscriber();
+  if (!subscriber) return;
+
+  try {
+    subscriber.on("message", (channel: string, message: string) => {
+      if (channel !== INVALIDATION_CHANNEL) return;
+      const profileId = message.trim();
+      if (!profileId) return;
+      applyLeaderboardInvalidationBroadcast(profileId);
+    });
+    subscriber.subscribe(INVALIDATION_CHANNEL).catch((err: Error) => {
+      logger.warn({ err }, "Failed to subscribe to leaderboard invalidation channel");
+    });
+    invalidationSubscriptionStarted = true;
+  } catch (err) {
+    logger.warn({ err }, "Failed to start leaderboard invalidation subscription");
+  }
+}
+
+async function broadcastInvalidation(profileId: string): Promise<void> {
+  const publisher = getRedisClient();
+  if (!publisher) return;
+  try {
+    await publisher.publish(INVALIDATION_CHANNEL, profileId);
+  } catch {
+    // Broadcast is best-effort; other replicas fall back to their short TTL.
+  }
+}
 
 function cacheKey(profileId: string, limit: number, offset: number, sort: LeaderboardSort) {
   return `${profileId}:${limit}:${offset}:${sort}`;
@@ -44,6 +89,8 @@ export async function getCachedLeaderboard(
   sort: LeaderboardSort,
 ): Promise<LeaderboardResponse | null> {
   const key = cacheKey(profileId, limit, offset, sort);
+
+  ensureInvalidationSubscription();
 
   if (getIsRedisAvailable()) {
     const redis = getRedisClient()!;
@@ -78,6 +125,8 @@ export async function setCachedLeaderboard(
 ): Promise<void> {
   const key = cacheKey(profileId, limit, offset, sort);
 
+  ensureInvalidationSubscription();
+
   if (getIsRedisAvailable()) {
     const redis = getRedisClient()!;
     try {
@@ -93,7 +142,7 @@ export async function setCachedLeaderboard(
 
 function setInProcessCache(key: string, value: LeaderboardResponse): void {
   leaderboardCache.set(key, {
-    expiresAt: Date.now() + CACHE_TTL_SECONDS * 1000,
+    expiresAt: Date.now() + FALLBACK_CACHE_TTL_SECONDS * 1000,
     value,
   });
 }
@@ -120,6 +169,11 @@ export async function invalidateProfileLeaderboardCache(profileId: string): Prom
   // Always clear the in-process fallback cache regardless of the Redis path,
   // so a stale entry can never be served after this call reports success.
   invalidateInProcessCache(profileId);
+
+  // Other replicas can only clear their own fallback caches, so tell them to
+  // drop theirs (#1350). Published after the local clear so this replica's own
+  // state is correct regardless of whether the broadcast succeeds.
+  await broadcastInvalidation(profileId);
 }
 
 function invalidateInProcessCache(profileId: string): void {
@@ -129,4 +183,13 @@ function invalidateInProcessCache(profileId: string): void {
       leaderboardCache.delete(key);
     }
   }
+}
+
+/**
+ * Apply an invalidation broadcast received from another replica. Exported so
+ * the broadcast handler and tests exercise the same code path.
+ */
+export function applyLeaderboardInvalidationBroadcast(profileId: string): void {
+  if (!profileId) return;
+  invalidateInProcessCache(profileId);
 }
