@@ -282,7 +282,8 @@ pub fn unpause(e: Env) -> Result<(), Error> {
         }
 
         // Effects: update storage BEFORE the external token transfer (CEI)
-        st.set(&key, &(balance - amount));
+        let new_balance = balance.checked_sub(amount).ok_or(Error::Overflow)?;
+        st.set(&key, &new_balance);
         st.extend_ttl(&key, LEDGERS_THRESHOLD, LEDGERS_TO_LIVE);
 
         // Emit a withdraw event

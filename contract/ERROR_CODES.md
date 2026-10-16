@@ -16,42 +16,43 @@ Error codes are organized into ranges by category:
 
 ### Input Validation Errors (1-99)
 
-| Code | Error Name | Description |
-|------|------------|-------------|
-| 2 | `ZeroAmount` | Amount cannot be zero |
-| 3 | `NegativeAmount` | Amount cannot be negative |
-| 4 | `EmptyMessage` | Message cannot be empty when required |
-| 5 | `MessageTooLong` | Message exceeds maximum length (280 characters) |
-| 6 | `InvalidAssetCode` | Asset code is invalid or empty |
+| Code | Error Name         | Description                                     |
+| ---- | ------------------ | ----------------------------------------------- |
+| 2    | `ZeroAmount`       | Amount cannot be zero                           |
+| 3    | `NegativeAmount`   | Amount cannot be negative                       |
+| 4    | `EmptyMessage`     | Message cannot be empty when required           |
+| 5    | `MessageTooLong`   | Message exceeds maximum length (280 characters) |
+| 6    | `InvalidAssetCode` | Asset code is invalid or empty                  |
 
 ### Authorization Errors (100-199)
 
-| Code | Error Name | Description |
-|------|------------|-------------|
-| 102 | `NotRecipient` | Caller is not the intended recipient |
+| Code | Error Name     | Description                          |
+| ---- | -------------- | ------------------------------------ |
+| 102  | `NotRecipient` | Caller is not the intended recipient |
 
 ### Contract State Errors (200-299)
 
-| Code | Error Name | Description |
-|------|------------|-------------|
-| 200 | `ContractPaused` | Contract is currently paused |
-| 201 | `ContractNotInitialized` | Contract has not been initialized |
-| 202 | `AlreadyInitialized` | Contract has already been initialized |
+| Code | Error Name               | Description                           |
+| ---- | ------------------------ | ------------------------------------- |
+| 200  | `ContractPaused`         | Contract is currently paused          |
+| 201  | `ContractNotInitialized` | Contract has not been initialized     |
+| 202  | `AlreadyInitialized`     | Contract has already been initialized |
 
 ### Balance and Transfer Errors (300-399)
 
-| Code | Error Name | Description |
-|------|------------|-------------|
-| 300 | `InsufficientBalance` | Supporter has insufficient token balance |
-| 301 | `InsufficientContractBalance` | Contract has insufficient balance for withdrawal |
-| 303 | `WithdrawAmountExceedsBalance` | Withdrawal amount exceeds recipient's balance |
+| Code | Error Name                     | Description                                       |
+| ---- | ------------------------------ | ------------------------------------------------- |
+| 300  | `InsufficientBalance`          | Supporter has insufficient token balance          |
+| 301  | `InsufficientContractBalance`  | Contract has insufficient balance for withdrawal  |
+| 302  | `Overflow`                     | Arithmetic overflow detected in checked operation |
+| 303  | `WithdrawAmountExceedsBalance` | Withdrawal amount exceeds recipient's balance     |
 
 ### Storage and Data Errors (400-499)
 
-| Code | Error Name | Description |
-|------|------------|-------------|
-| 402 | `RecipientNotFound` | Recipient has no balance for the specified asset |
-| 403 | `ZeroBalance` | Recipient has a zero balance for the requested operation |
+| Code | Error Name          | Description                                              |
+| ---- | ------------------- | -------------------------------------------------------- |
+| 402  | `RecipientNotFound` | Recipient has no balance for the specified asset         |
+| 403  | `ZeroBalance`       | Recipient has a zero balance for the requested operation |
 
 ## Usage Examples
 
@@ -75,12 +76,14 @@ match client.support(&supporter, &recipient, &asset, &amount, &code, &message) {
    - `ContractPaused` (200): Contract is paused by admin
    - `InsufficientBalance` (300): User doesn't have enough tokens
    - `MessageTooLong` (5): Support message exceeds 280 characters
+   - `Overflow` (302): Arithmetic overflow in balance calculation
 
 2. **Withdrawal Errors**:
    - `NotRecipient` (102): Someone other than recipient tries to withdraw
    - `WithdrawAmountExceedsBalance` (303): Trying to withdraw more than available
    - `RecipientNotFound` (402): No balance exists for this recipient/asset pair
    - `ZeroBalance` (403): Recipient balance is zero
+   - `Overflow` (302): Arithmetic overflow in balance calculation
 
 3. **Admin Operation Errors**:
    - `ContractNotInitialized` (201): Operations before initialization

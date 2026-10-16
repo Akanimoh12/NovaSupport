@@ -46,7 +46,9 @@ export async function reclaimStuckWebhookDeliveries(
 
   if (stuck.length === 0) return 0;
 
-  const exhausted = stuck.filter((d) => d.attemptCount >= MAX_DELIVERY_ATTEMPTS);
+  const exhausted = stuck.filter(
+    (d) => d.attemptCount >= MAX_DELIVERY_ATTEMPTS,
+  );
   const retryable = stuck.filter((d) => d.attemptCount < MAX_DELIVERY_ATTEMPTS);
 
   if (exhausted.length > 0) {
@@ -55,7 +57,8 @@ export async function reclaimStuckWebhookDeliveries(
       data: {
         status: "failed",
         nextRetryAt: null,
-        lastError: "Delivery stuck in processing and reclaimed after max attempts",
+        lastError:
+          "Delivery stuck in processing and reclaimed after max attempts",
       },
     });
   }
@@ -65,7 +68,11 @@ export async function reclaimStuckWebhookDeliveries(
     // Still guarded on status: a row that finished between the read and this
     // write must not be dragged back into pending.
     const result = await prismaClient.webhookDelivery.updateMany({
-      where: { id: delivery.id, status: "processing", updatedAt: { lte: stuckBefore } },
+      where: {
+        id: delivery.id,
+        status: "processing",
+        updatedAt: { lte: stuckBefore },
+      },
       data: {
         status: "pending",
         nextRetryAt: now,
@@ -86,9 +93,90 @@ export async function reclaimStuckWebhookDeliveries(
   return reclaimed + exhausted.length;
 }
 
+/**
+ * Process a single webhook delivery
+ */
+async function processDelivery(
+  delivery: any,
+  prismaClient: typeof prisma,
+  deliver: typeof deliverWebhook,
+) {
+  const claimed = await prismaClient.webhookDelivery.updateMany({
+    where: { id: delivery.id, status: "pending" },
+    data: { status: "processing" },
+  });
+  if (claimed.count === 0) return;
+
+  const payload = delivery.payload as Record<string, unknown>;
+  const result = await deliver(
+    delivery.webhook.url,
+    delivery.webhook.signingKey,
+    payload,
+  );
+
+  if (result.status === "success") {
+    await prismaClient.webhookDelivery.update({
+      where: { id: delivery.id },
+      data: {
+        status: "success",
+        attemptCount: delivery.attemptCount + 1,
+        lastError: null,
+      },
+    });
+    logger.info(
+      {
+        deliveryId: delivery.id,
+        webhookId: delivery.webhookId,
+        statusCode: result.statusCode,
+      },
+      "Webhook delivered successfully",
+    );
+    Metrics.webhooksDelivered();
+  } else {
+    const nextAttempt = delivery.attemptCount + 1;
+    const willRetry = result.willRetry && shouldRetry(nextAttempt);
+
+    let nextRetryAt: Date | null = null;
+    if (willRetry) {
+      const delayMs = getNextRetryDelay(delivery.attemptCount);
+      if (delayMs !== null) {
+        nextRetryAt = new Date(Date.now() + delayMs);
+      }
+    }
+
+    await prismaClient.webhookDelivery.update({
+      where: { id: delivery.id },
+      data: {
+        status: willRetry ? "pending" : "failed",
+        attemptCount: nextAttempt,
+        nextRetryAt,
+        lastError: result.error,
+      },
+    });
+
+    logger.warn(
+      {
+        deliveryId: delivery.id,
+        webhookId: delivery.webhookId,
+        attempt: nextAttempt,
+        nextRetryAt,
+        error: result.error,
+      },
+      willRetry
+        ? "Webhook delivery failed, scheduled retry"
+        : "Webhook delivery failed permanently",
+    );
+    if (willRetry) {
+      Metrics.webhookRetries();
+    }
+    Metrics.webhookDeliveryErrors();
+  }
+}
+
 export async function processPendingWebhookDeliveries(
   prismaClient = prisma,
   deliver = deliverWebhook,
+  concurrency: number = Number(process.env.WEBHOOK_CONCURRENCY ?? 5),
 ) {
   const now = new Date();
 
@@ -104,67 +192,17 @@ export async function processPendingWebhookDeliveries(
     take: 50,
   });
 
-  for (const delivery of pendingDeliveries) {
-    const claimed = await prismaClient.webhookDelivery.updateMany({
-      where: { id: delivery.id, status: "pending" },
-      data: { status: "processing" },
-    });
-    if (claimed.count === 0) continue;
+  // Process deliveries with bounded concurrency to prevent head-of-line blocking
+  // Issue #1357: One slow endpoint shouldn't delay the entire batch
+  const chunks: (typeof pendingDeliveries)[] = [];
+  for (let i = 0; i < pendingDeliveries.length; i += concurrency) {
+    chunks.push(pendingDeliveries.slice(i, i + concurrency));
+  }
 
-    const payload = delivery.payload as Record<string, unknown>;
-    const result = await deliver(delivery.webhook.url, delivery.webhook.signingKey, payload);
-
-    if (result.status === "success") {
-      await prismaClient.webhookDelivery.update({
-        where: { id: delivery.id },
-        data: {
-          status: "success",
-          attemptCount: delivery.attemptCount + 1,
-          lastError: null,
-        },
-      });
-      logger.info(
-        { deliveryId: delivery.id, webhookId: delivery.webhookId, statusCode: result.statusCode },
-        "Webhook delivered successfully",
-      );
-      Metrics.webhooksDelivered();
-    } else {
-      const nextAttempt = delivery.attemptCount + 1;
-      const willRetry = result.willRetry && shouldRetry(nextAttempt);
-
-      let nextRetryAt: Date | null = null;
-      if (willRetry) {
-        const delayMs = getNextRetryDelay(delivery.attemptCount);
-        if (delayMs !== null) {
-          nextRetryAt = new Date(Date.now() + delayMs);
-        }
-      }
-
-      await prismaClient.webhookDelivery.update({
-        where: { id: delivery.id },
-        data: {
-          status: willRetry ? "pending" : "failed",
-          attemptCount: nextAttempt,
-          nextRetryAt,
-          lastError: result.error,
-        },
-      });
-
-      logger.warn(
-        {
-          deliveryId: delivery.id,
-          webhookId: delivery.webhookId,
-          attempt: nextAttempt,
-          nextRetryAt,
-          error: result.error,
-        },
-        willRetry ? "Webhook delivery failed, scheduled retry" : "Webhook delivery failed permanently"
-      );
-      if (willRetry) {
-        Metrics.webhookRetries();
-      }
-      Metrics.webhookDeliveryErrors();
-    }
+  for (const chunk of chunks) {
+    await Promise.allSettled(
+      chunk.map((delivery) => processDelivery(delivery, prismaClient, deliver)),
+    );
   }
 }
 
@@ -185,11 +223,16 @@ type ProcessorOptions = {
   startWorker?: typeof createWebhookWorker;
 };
 
-export function startWebhookProcessor(options: ProcessorOptions = {}): WebhookProcessorHandle {
+export function startWebhookProcessor(
+  options: ProcessorOptions = {},
+): WebhookProcessorHandle {
   const redisAvailable = options.redisAvailable ?? getIsRedisAvailable();
-  const processPending = options.processPending ?? processPendingWebhookDeliveries;
+  const processPending =
+    options.processPending ?? processPendingWebhookDeliveries;
   const reclaimStuck = options.reclaimStuck ?? reclaimStuckWebhookDeliveries;
-  const interval = options.intervalMs ?? Number(process.env.WEBHOOK_PROCESSOR_INTERVAL_MS ?? 10000);
+  const interval =
+    options.intervalMs ??
+    Number(process.env.WEBHOOK_PROCESSOR_INTERVAL_MS ?? 10000);
 
   if (redisAvailable) {
     logger.info("Redis available — starting BullMQ webhook queue");
@@ -199,7 +242,10 @@ export function startWebhookProcessor(options: ProcessorOptions = {}): WebhookPr
 
   // SQL-scheduled retries must still be swept when Redis is available, so
   // BullMQ and the poller share the same atomic status claim.
-  logger.info({ interval, redisAvailable }, "Starting DB-polled webhook processor");
+  logger.info(
+    { interval, redisAvailable },
+    "Starting DB-polled webhook processor",
+  );
   processorStopped = false;
 
   const runSweep = () => {
