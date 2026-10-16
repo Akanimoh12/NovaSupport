@@ -75,6 +75,7 @@ export function EmbedWidget({
 }: EmbedWidgetProps) {
   const t = themeClasses[theme];
   const s = sizeClasses[size];
+  const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
 
   const truncate = (addr: string) =>
     addr.length > 10 ? `${addr.slice(0, 4)}…${addr.slice(-4)}` : addr;
@@ -87,11 +88,12 @@ export function EmbedWidget({
     >
       {/* Header */}
       <div className="flex items-center gap-3 mb-3">
-        {avatarUrl ? (
+        {avatarUrl && failedAvatarUrl !== avatarUrl ? (
           <img
             src={avatarUrl}
             alt={displayName}
             className="w-10 h-10 rounded-full object-cover flex-shrink-0"
+            onError={() => setFailedAvatarUrl(avatarUrl)}
           />
         ) : (
           <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold flex-shrink-0">

@@ -327,6 +327,16 @@ export function SupportPanel({
   }, [visitorAddress]);
 
   useEffect(() => {
+    function handleWalletDisconnect() {
+      setVisitorAddress(null);
+    }
+
+    window.addEventListener("wallet-disconnected", handleWalletDisconnect);
+    return () =>
+      window.removeEventListener("wallet-disconnected", handleWalletDisconnect);
+  }, []);
+
+  useEffect(() => {
     if (!visitorAddress) return;
     const address = visitorAddress;
     async function fetchBalances() {

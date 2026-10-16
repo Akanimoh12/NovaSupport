@@ -94,7 +94,7 @@ export function TransactionResultModal({
           setTxStatus("finalized");
         }, 1500);
       } catch (err) {
-        if (cancelled) return;
+        if (cancelled || pollingDoneRef.current) return;
         setTxStatus("failed");
         setTxStatusMessage("Couldn't confirm transaction. Please check the explorer.");
         pollingDoneRef.current = true;
