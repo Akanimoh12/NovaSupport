@@ -4733,18 +4733,62 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       nextRunAt = addMonths(new Date(), 1);
     }
 
-    await prisma.recurringSupport.create({
-      data: {
-        supporterId: user.id,
-        supporterAddress: req.auth!.walletAddress,
-        profileId,
-        amount,
-        assetCode,
-        assetIssuer: assetIssuer ?? null,
-        frequency,
-        nextRunAt,
-      },
-    });
+    try {
+      await prisma.$transaction(
+        async (tx) => {
+          // Dedup guard: reject if an active or paused subscription already exists
+          // for this supporter/profile/asset combination.
+          const existing = await tx.recurringSupport.findFirst({
+            where: {
+              supporterId: user.id,
+              profileId,
+              assetCode,
+              assetIssuer: assetIssuer ?? null,
+              status: { not: "cancelled" },
+            },
+          });
+          if (existing) {
+            throw new Error("DUPLICATE_RECURRING_SUPPORT");
+          }
+
+          // Per-profile cap: a supporter may have at most 20 active subscriptions
+          // per profile across all assets, matching the milestone cap pattern.
+          const activeCount = await tx.recurringSupport.count({
+            where: { supporterId: user.id, profileId, status: { not: "cancelled" } },
+          });
+          if (activeCount >= 20) {
+            throw new Error("MAX_RECURRING_SUPPORT_EXCEEDED");
+          }
+
+          await tx.recurringSupport.create({
+            data: {
+              supporterId: user.id,
+              supporterAddress: req.auth!.walletAddress,
+              profileId,
+              amount,
+              assetCode,
+              assetIssuer: assetIssuer ?? null,
+              frequency,
+              nextRunAt,
+            },
+          });
+        },
+        { isolationLevel: "Serializable" },
+      );
+    } catch (err) {
+      if (err instanceof Error && err.message === "DUPLICATE_RECURRING_SUPPORT") {
+        return sendError(res, 409, "An active subscription for this profile and asset already exists", "DUPLICATE_RECURRING_SUPPORT");
+      }
+      if (err instanceof Error && err.message === "MAX_RECURRING_SUPPORT_EXCEEDED") {
+        return sendError(res, 422, "Maximum 20 active subscriptions per profile");
+      }
+      if (err && typeof err === "object" && "code" in err && err.code === "P2034") {
+        req.log.warn({ err }, "retryable recurring-support creation serialization conflict");
+        return sendError(res, 409, "Subscription creation conflicted; please retry", "RETRYABLE_WRITE_CONFLICT");
+      }
+      req.log.error({ err }, "database error creating recurring support");
+      return sendError(res, 500, "Internal server error");
+    }
 
     return res.status(201).json({ message: "Recurring support created" });
   });
@@ -4840,6 +4884,18 @@ All errors return JSON with an \`error\` field and optional \`code\`:
 
     const { status, frequency, amount, assetIssuer } = parsed.data;
 
+    // #1331: Block reactivation from a cancelled state. A cancelled subscription
+    // cannot be flipped back to active or paused via PATCH; the caller must create
+    // a new subscription instead.
+    if (subscription.status === "cancelled" && status && status !== "cancelled") {
+      return sendError(
+        res,
+        422,
+        "A cancelled subscription cannot be reactivated. Please create a new subscription.",
+        "CANNOT_REACTIVATE_CANCELLED",
+      );
+    }
+
     if (assetIssuer !== undefined) {
       const profile = await prisma.profile.findUnique({
         where: { id: subscription.profileId },
@@ -4869,10 +4925,15 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       }
     }
 
+    // #1330: When status transitions to "cancelled" via PATCH, set cancelledAt
+    // to match the DELETE endpoint's behaviour and keep records consistent.
+    const isCancellingNow = status === "cancelled" && subscription.status !== "cancelled";
+
     const updated = await prisma.recurringSupport.update({
       where: { id: id as string },
       data: {
         ...(status ? { status } : {}),
+        ...(isCancellingNow ? { cancelledAt: new Date() } : {}),
         ...(frequency ? { frequency } : {}),
         ...(amount ? { amount } : {}),
         ...(assetIssuer !== undefined ? { assetIssuer } : {}),
@@ -4900,7 +4961,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     return res.json(subscription);
   });
 
-  v1Router.delete("/recurring-support/:id", requireAuth, async (req, res) => {
+  v1Router.delete("/recurring-support/:id", requireAuth, writeLimiter, async (req, res) => {
     const { id } = req.params;
 
     const user = await prisma.user.findFirst({ where: { email: req.auth!.walletAddress } });
