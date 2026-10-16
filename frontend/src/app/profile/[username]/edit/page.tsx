@@ -313,11 +313,13 @@ export default function EditProfilePage() {
             </h2>
 
             <Field
+              id="display-name"
               label="Display Name"
               required
               error={fieldErrors.displayName?.message}
             >
               <input
+                id="display-name"
                 type="text"
                 {...register("displayName")}
                 maxLength={64}
@@ -326,8 +328,9 @@ export default function EditProfilePage() {
               />
             </Field>
 
-            <Field label="Bio" error={fieldErrors.bio?.message}>
+            <Field id="bio" label="Bio" error={fieldErrors.bio?.message}>
               <textarea
+                id="bio"
                 {...register("bio")}
                 maxLength={280}
                 rows={3}
@@ -339,8 +342,9 @@ export default function EditProfilePage() {
               </p>
             </Field>
 
-            <Field label="Website URL" error={fieldErrors.websiteUrl?.message}>
+            <Field id="website-url" label="Website URL" error={fieldErrors.websiteUrl?.message}>
               <input
+                id="website-url"
                 type="url"
                 {...register("websiteUrl")}
                 className={inputCls(!!fieldErrors.websiteUrl)}
@@ -348,8 +352,9 @@ export default function EditProfilePage() {
               />
             </Field>
 
-            <Field label="Twitter Handle" error={fieldErrors.twitterHandle?.message}>
+            <Field id="twitter-handle" label="Twitter Handle" error={fieldErrors.twitterHandle?.message}>
               <input
+                id="twitter-handle"
                 type="text"
                 {...register("twitterHandle")}
                 maxLength={15}
@@ -358,8 +363,9 @@ export default function EditProfilePage() {
               />
             </Field>
 
-            <Field label="GitHub Handle" error={fieldErrors.githubHandle?.message}>
+            <Field id="github-handle" label="GitHub Handle" error={fieldErrors.githubHandle?.message}>
               <input
+                id="github-handle"
                 type="text"
                 {...register("githubHandle")}
                 maxLength={39}
@@ -368,8 +374,9 @@ export default function EditProfilePage() {
               />
             </Field>
 
-            <Field label="Email" error={fieldErrors.email?.message}>
+            <Field id="email" label="Email" error={fieldErrors.email?.message}>
               <input
+                id="email"
                 type="email"
                 {...register("email")}
                 className={inputCls(!!fieldErrors.email)}
@@ -408,8 +415,9 @@ export default function EditProfilePage() {
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
               <div className="flex-1">
-                <label className="block text-xs text-steel mb-1">Asset Code</label>
+                <label htmlFor="new-asset-code" className="block text-xs text-steel mb-1">Asset Code</label>
                 <input
+                  id="new-asset-code"
                   type="text"
                   value={newAssetCode}
                   onChange={(e) => { setNewAssetCode(e.target.value.toUpperCase()); setAssetError(null); }}
@@ -419,8 +427,9 @@ export default function EditProfilePage() {
                 />
               </div>
               <div className="flex-1">
-                <label className="block text-xs text-steel mb-1">Issuer (optional)</label>
+                <label htmlFor="new-asset-issuer" className="block text-xs text-steel mb-1">Issuer (optional)</label>
                 <input
+                  id="new-asset-issuer"
                   type="text"
                   value={newAssetIssuer}
                   onChange={(e) => setNewAssetIssuer(e.target.value)}
@@ -470,11 +479,13 @@ function inputCls(hasError: boolean) {
 }
 
 function Field({
+  id,
   label,
   required,
   error,
   children,
 }: {
+  id: string;
   label: string;
   required?: boolean;
   error?: string;
@@ -482,7 +493,7 @@ function Field({
 }) {
   return (
     <div>
-      <label className="block text-xs font-medium text-steel mb-1.5">
+      <label htmlFor={id} className="block text-xs font-medium text-steel mb-1.5">
         {label}
         {required && <span className="text-red-400 ml-0.5">*</span>}
       </label>
