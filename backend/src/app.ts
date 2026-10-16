@@ -1353,7 +1353,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
         assetCode: g.assetCode,
         assetIssuer: g.assetIssuer,
         total: g._sum.amount ? g._sum.amount.toFixed(7) : "0.0000000",
-      }));
+      })).sort((a, b) => Number(b.total) - Number(a.total));
 
       res.json({
         totalTransactions,

@@ -20,6 +20,7 @@ type AssetFilter = "all" | "XLM" | "USDC";
 
 export default function ExplorePage() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [filterProfiles, setFilterProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sort, setSort] = useState<SortOption>("newest");
@@ -47,8 +48,21 @@ export default function ExplorePage() {
   }, [sort, asset, assetIssuer]);
 
   useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_BASE_URL}/profiles?limit=100&offset=0&sort=newest`)
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error("Failed to fetch filter options")))
+      .then((data) => {
+        if (!cancelled) setFilterProfiles(Array.isArray(data.profiles) ? data.profiles : []);
+      })
+      .catch(() => {
+        if (!cancelled) setFilterProfiles([]);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
     const issuers = new Set<string>();
-    profiles.forEach((p) => {
+    filterProfiles.forEach((p) => {
       p.acceptedAssets.forEach((a) => {
         if (a.issuer) {
           issuers.add(`${a.code}:${a.issuer}`);
@@ -62,7 +76,11 @@ export default function ExplorePage() {
       })
       .sort((a, b) => a.code.localeCompare(b.code) || a.issuer.localeCompare(b.issuer));
     setAvailableIssuers(unique);
-  }, [profiles]);
+  }, [filterProfiles]);
+
+  const availableAssets = Array.from(new Set(
+    filterProfiles.flatMap((profile) => profile.acceptedAssets.map((accepted) => accepted.code)),
+  )).sort();
 
   async function fetchProfiles(currentOffset: number, reset = false) {
     try {
@@ -153,8 +171,9 @@ export default function ExplorePage() {
               className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white focus:border-mint/50 focus:outline-none"
             >
               <option value="all">All</option>
-              <option value="XLM">XLM</option>
-              <option value="USDC">USDC</option>
+              {availableAssets.map((code) => (
+                <option key={code} value={code}>{code}</option>
+              ))}
             </select>
           </div>
 

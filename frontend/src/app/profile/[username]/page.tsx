@@ -362,7 +362,11 @@ export default async function ProfilePage({ params }: PageProps) {
               <div className="flex items-center justify-between">
                 <span className="text-sm text-sky/60">Total Raised</span>
                 <span className="text-sm font-bold text-white">
-                  {stats?.assetTotals?.[0]?.total || "0"} {stats?.assetTotals?.[0]?.assetCode || "XLM"}
+                  {stats?.assetTotals?.reduce((dominant, current) =>
+                    Number(current.total) > Number(dominant.total) ? current : dominant,
+                  stats.assetTotals[0])?.total || "0"} {stats?.assetTotals?.reduce((dominant, current) =>
+                    Number(current.total) > Number(dominant.total) ? current : dominant,
+                  stats.assetTotals[0])?.assetCode || "XLM"}
                 </span>
               </div>
               <div className="flex items-center justify-between">

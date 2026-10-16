@@ -37,6 +37,7 @@ interface AnalyticsData {
 }
 
 type ProfileSettings = {
+  profileId: string;
   walletAddress: string;
   email?: string | null;
   emailVerified?: boolean;
@@ -304,6 +305,7 @@ export default function DashboardPage() {
         const profileJson = (await profileRes.json()) as Record<string, unknown>;
         setData(normalizeAnalyticsResponse(json));
         setSettings({
+          profileId: toString(profileJson.id, campaignId),
           walletAddress: toString(profileJson.walletAddress),
           email: toString(profileJson.email, "") || null,
           emailVerified: toBool(profileJson.emailVerified, false),
@@ -446,7 +448,7 @@ export default function DashboardPage() {
       setDripsLoading(true);
       try {
         const endpoint = isOwner
-          ? `${API_BASE_URL}/recurring-support?profileId=${campaignId}`
+          ? `${API_BASE_URL}/recurring-support?profileId=${encodeURIComponent(settings?.profileId ?? campaignId)}`
           : `${API_BASE_URL}/recurring-support`;
 
         const res = await apiFetch(endpoint);
@@ -469,7 +471,7 @@ export default function DashboardPage() {
     fetchDrips();
 
     return () => { cancelled = true; };
-  }, [campaignId, isOwner]);
+  }, [campaignId, isOwner, settings?.profileId]);
 
   async function handleDripAction(id: string, action: "paused" | "cancelled") {
     setDripActionLoading(id);
@@ -938,9 +940,9 @@ export default function DashboardPage() {
             <h3 className="text-sm font-semibold uppercase tracking-widest text-steel font-mono">
               Active Drips
             </h3>
-            {drips.length > 0 && (
+            {drips.filter((drip) => drip.status === "active").length > 0 && (
               <span className="rounded-full bg-purple-500/10 px-3 py-1 text-xs font-bold text-purple-400">
-                {drips.length} active
+                {drips.filter((drip) => drip.status === "active").length} active
               </span>
             )}
           </div>
@@ -958,7 +960,7 @@ export default function DashboardPage() {
             </div>
           ) : drips.length === 0 ? (
             <p className="py-8 text-center text-sm text-steel">
-              No active drips{isOwner ? " set up for this profile" : ""}.
+              No drips{isOwner ? " set up for this profile" : ""}.
             </p>
           ) : (
             <div className="space-y-3">
@@ -988,6 +990,15 @@ export default function DashboardPage() {
                   </span>
                   <span className="rounded-full border border-white/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase text-sky/70">
                     {drip.frequency}
+                  </span>
+                  <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase ${
+                    drip.status === "active"
+                      ? "border-mint/30 bg-mint/10 text-mint"
+                      : drip.status === "paused"
+                        ? "border-amber-400/30 bg-amber-400/10 text-amber-300"
+                        : "border-red-400/30 bg-red-400/10 text-red-300"
+                  }`}>
+                    {drip.status}
                   </span>
                   <span className="text-xs text-sky/60">
                     Next: {new Date(drip.nextRunAt).toLocaleDateString()}
