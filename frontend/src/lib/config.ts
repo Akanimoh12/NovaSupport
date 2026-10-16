@@ -24,8 +24,9 @@ export const STELLAR_NETWORK =
   process.env.NEXT_PUBLIC_STELLAR_NETWORK ?? "TESTNET";
 
 export const NETWORK_PASSPHRASE =
-  process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ??
-  "Test SDF Network ; September 2015";
+  STELLAR_NETWORK === "PUBLIC"
+    ? "Public Global Stellar Network ; September 2015"
+    : "Test SDF Network ; September 2015";
 
 export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 

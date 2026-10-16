@@ -143,10 +143,10 @@ const lobstrAdapter: WalletAdapter = {
     if (!result) throw new WalletError("Lobstr did not return a public key.", "CONNECTION_DENIED");
     return result;
   },
-  async signTransaction(xdr, _options) {
+  async signTransaction(xdr, { networkPassphrase }) {
     const lobstr = (window as any).lobstr;
     if (!lobstr) throw new WalletError("Lobstr extension not found.", "NOT_FOUND");
-    const result = await lobstr.signTransaction(xdr);
+    const result = await lobstr.signTransaction(xdr, { networkPassphrase });
     if (!result?.signedTxXdr)
       throw new WalletError("Lobstr did not return a signed transaction.", "SIGNING_FAILED");
     return result.signedTxXdr;
