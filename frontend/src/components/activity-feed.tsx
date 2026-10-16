@@ -12,7 +12,6 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import Link from "next/link";
 import { API_BASE_URL } from "@/lib/config";
 import { stellarExpertUrl } from "@/lib/stellar";
 
@@ -244,7 +243,7 @@ export function ActivityFeed({ username, limit = 10 }: ActivityFeedProps) {
                           </span>
                         )}
                         {activity.metadata.txHash && (
-                          <Link
+                          <a
                             href={stellarExpertUrl('tx', activity.metadata.txHash)}
                             target="_blank"
                             rel="noopener noreferrer"
@@ -252,7 +251,7 @@ export function ActivityFeed({ username, limit = 10 }: ActivityFeedProps) {
                           >
                             {truncateHash(activity.metadata.txHash)}
                             <span>↗</span>
-                          </Link>
+                          </a>
                         )}
                       </div>
                     )}

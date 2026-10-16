@@ -298,16 +298,27 @@ export function ProfileCard({
         <div className="w-full sm:w-auto mt-4 sm:mt-0 rounded-3xl border border-mint/20 bg-ink/50 px-4 py-3 text-sm text-sky/80">
           <p className="font-semibold text-white">Stellar Wallet</p>
           <div className="mt-2 flex items-center">
-            <a
-              href={expertUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              onKeyDown={handleKeyDown}
-              aria-label={`Stellar wallet address: ${walletAddress}. Press Ctrl+C to copy.`}
-              className="text-xs text-indigo-500 hover:underline font-mono break-all flex-1 focus:outline-none focus:ring-1 focus:ring-mint/50 rounded"
-            >
-              {walletAddress}
-            </a>
+            {isValid ? (
+              <a
+                href={expertUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onKeyDown={handleKeyDown}
+                aria-label={`Stellar wallet address: ${walletAddress}. Press Ctrl+C to copy.`}
+                className="text-xs text-indigo-500 hover:underline font-mono break-all flex-1 focus:outline-none focus:ring-1 focus:ring-mint/50 rounded"
+              >
+                {walletAddress}
+              </a>
+            ) : (
+              <span
+                onKeyDown={handleKeyDown}
+                aria-label={`Stellar wallet address: ${walletAddress}. Press Ctrl+C to copy.`}
+                className="text-xs text-gold/80 font-mono break-all flex-1 focus:outline-none focus:ring-1 focus:ring-mint/50 rounded"
+                tabIndex={0}
+              >
+                {walletAddress}
+              </span>
+            )}
             <button 
               onClick={handleCopy} 
               aria-label="Copy wallet address to clipboard"

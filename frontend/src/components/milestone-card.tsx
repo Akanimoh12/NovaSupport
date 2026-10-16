@@ -170,7 +170,7 @@ export function MilestoneCard({ milestone, index = 0 }: MilestoneCardProps) {
             "font-medium tabular-nums",
             isReached ? "text-mint" : "text-steel"
           )}>
-            {current.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / {target.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
+            {current.toLocaleString(undefined, { maximumFractionDigits: 7 })} / {target.toLocaleString(undefined, { maximumFractionDigits: 7 })}{" "}
             <span className={cn(
               "font-semibold",
               isReached ? "text-mint" : "text-sky/60"
