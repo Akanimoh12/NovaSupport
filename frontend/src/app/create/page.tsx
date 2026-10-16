@@ -7,6 +7,7 @@ import { AppShell } from "@/components/app-shell";
 import { useToast } from "@/lib/use-toast";
 import { Toast } from "@/components/toast";
 import { validateWalletAddress } from "@/lib/stellar";
+import { STELLAR_NETWORK } from "@/lib/config";
 
 interface FormData {
   username: string;
@@ -40,7 +41,10 @@ const CONSTRAINTS = [
 // Well-known Stellar mainnet issuers for preset assets offered in onboarding.
 // XLM is native and never has an issuer.
 const KNOWN_ISSUERS: Record<string, string> = {
-  USDC: "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3THOJ2E37CEGOEZWDSP",
+  USDC:
+    STELLAR_NETWORK === "PUBLIC"
+      ? "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3THOJ2E37CEGOEZWDSP"
+      : "GBBD47IF6LWK7P7MDMSCR4XFM6KJLGMGR5E2Q3ZXZQ4KQQYT5R3332W",
 };
 
 export default function CreatePage() {
@@ -304,10 +308,11 @@ export default function CreatePage() {
               <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="flex flex-col gap-2">
-                    <label className="text-[10px] uppercase tracking-[0.25em] text-steel">
+                    <label htmlFor="display-name" className="text-[10px] uppercase tracking-[0.25em] text-steel">
                       Display Name <span className="text-mint">*</span>
                     </label>
                       <input
+                        id="display-name"
                         type="text"
                         required
                         maxLength={64}
@@ -319,7 +324,7 @@ export default function CreatePage() {
                   </div>
 
                   <div className="flex flex-col gap-2">
-                    <label className="text-[10px] uppercase tracking-[0.25em] text-steel">
+                    <label htmlFor="username" className="text-[10px] uppercase tracking-[0.25em] text-steel">
                       Username <span className="text-mint">*</span>
                     </label>
                     <div className="relative">
@@ -327,6 +332,7 @@ export default function CreatePage() {
                         @
                       </span>
                       <input
+                        id="username"
                         type="text"
                         required
                         maxLength={32}
@@ -351,7 +357,7 @@ export default function CreatePage() {
 
                 <div className="flex flex-col gap-2">
                   <div className="flex justify-between items-center">
-                    <label className="text-[10px] uppercase tracking-[0.25em] text-steel">
+                    <label htmlFor="bio" className="text-[10px] uppercase tracking-[0.25em] text-steel">
                       Bio
                     </label>
                     <span
@@ -363,6 +369,7 @@ export default function CreatePage() {
                     </span>
                   </div>
                   <textarea
+                    id="bio"
                     maxLength={280}
                     rows={4}
                     placeholder="Tell the galaxy about your mission…"
@@ -377,11 +384,12 @@ export default function CreatePage() {
             {step === 2 && (
               <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="flex flex-col gap-2">
-                  <label className="text-[10px] uppercase tracking-[0.25em] text-steel">
+                  <label htmlFor="wallet-address" className="text-[10px] uppercase tracking-[0.25em] text-steel">
                     Stellar Wallet Address <span className="text-mint">*</span>
                   </label>
                   <div className="relative">
                     <input
+                      id="wallet-address"
                       type="text"
                       required
                       placeholder="G…"
@@ -474,10 +482,11 @@ export default function CreatePage() {
                         .filter((a) => a.code !== "XLM")
                         .map((asset) => (
                           <div key={asset.code} className="flex flex-col gap-1.5">
-                            <label className="text-xs font-medium text-steel">
+                            <label htmlFor={`issuer-${asset.code}`} className="text-xs font-medium text-steel">
                               {asset.code} issuer
                             </label>
                             <input
+                              id={`issuer-${asset.code}`}
                               type="text"
                               placeholder={
                                 KNOWN_ISSUERS[asset.code] ? `Default: ${KNOWN_ISSUERS[asset.code].slice(0, 8)}…` : "G… Stellar issuer address"
@@ -512,7 +521,7 @@ export default function CreatePage() {
               <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="flex flex-col gap-2">
-                    <label className="text-[10px] uppercase tracking-[0.25em] text-steel">
+                    <label htmlFor="twitter-handle" className="text-[10px] uppercase tracking-[0.25em] text-steel">
                       Twitter / X
                     </label>
                     <div className="relative">
@@ -520,6 +529,7 @@ export default function CreatePage() {
                         @
                       </span>
                       <input
+                        id="twitter-handle"
                         type="text"
                         maxLength={15}
                         placeholder="handle"
@@ -536,10 +546,11 @@ export default function CreatePage() {
                   </div>
 
                   <div className="flex flex-col gap-2">
-                    <label className="text-[10px] uppercase tracking-[0.25em] text-steel">
+                    <label htmlFor="github-handle" className="text-[10px] uppercase tracking-[0.25em] text-steel">
                       GitHub
                     </label>
                     <input
+                      id="github-handle"
                       type="text"
                       maxLength={39}
                       placeholder="username"
@@ -556,10 +567,11 @@ export default function CreatePage() {
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <label className="text-[10px] uppercase tracking-[0.25em] text-steel">
+                  <label htmlFor="website-url" className="text-[10px] uppercase tracking-[0.25em] text-steel">
                     Website
                   </label>
                   <input
+                    id="website-url"
                     type="url"
                     placeholder="https://yoursite.com"
                     value={form.websiteUrl}
@@ -574,10 +586,11 @@ export default function CreatePage() {
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <label className="text-[10px] uppercase tracking-[0.25em] text-steel">
+                  <label htmlFor="email" className="text-[10px] uppercase tracking-[0.25em] text-steel">
                     Email (Private)
                   </label>
                   <input
+                    id="email"
                     type="email"
                     placeholder="you@example.com"
                     value={form.email}

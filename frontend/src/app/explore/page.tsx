@@ -142,10 +142,11 @@ export default function ExplorePage() {
         {/* Filters */}
         <div className="mb-8 flex flex-wrap gap-4">
           <div>
-            <label className="text-xs uppercase tracking-[0.2em] text-sky/70 block mb-2">
+            <label htmlFor="explore-sort" className="text-xs uppercase tracking-[0.2em] text-sky/70 block mb-2">
               Sort by
             </label>
             <select
+              id="explore-sort"
               value={sort}
               onChange={(e) => setSort(e.target.value as SortOption)}
               className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white focus:border-mint/50 focus:outline-none"
@@ -157,10 +158,11 @@ export default function ExplorePage() {
           </div>
 
           <div>
-            <label className="text-xs uppercase tracking-[0.2em] text-sky/70 block mb-2">
+            <label htmlFor="explore-asset" className="text-xs uppercase tracking-[0.2em] text-sky/70 block mb-2">
               Asset
             </label>
             <select
+              id="explore-asset"
               value={asset}
               onChange={(e) => {
                 setAsset(e.target.value);
@@ -179,10 +181,11 @@ export default function ExplorePage() {
 
           {filteredIssuers.length > 0 && (
             <div>
-              <label className="text-xs uppercase tracking-[0.2em] text-sky/70 block mb-2">
+              <label htmlFor="explore-issuer" className="text-xs uppercase tracking-[0.2em] text-sky/70 block mb-2">
                 Issuer
               </label>
               <select
+                id="explore-issuer"
                 value={assetIssuer}
                 onChange={(e) => setAssetIssuer(e.target.value)}
                 className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white focus:border-mint/50 focus:outline-none"
@@ -216,7 +219,7 @@ export default function ExplorePage() {
 
         {/* Error state */}
         {error && (
-          <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-6 py-4 text-red-200">
+          <div role="alert" aria-live="assertive" className="rounded-2xl border border-red-500/30 bg-red-500/10 px-6 py-4 text-red-200">
             {error}
           </div>
         )}
@@ -280,7 +283,7 @@ export default function ExplorePage() {
 
             {/* Infinite scroll sentinel */}
             {hasMore && profiles.length > 0 && (
-              <div ref={sentinelRef} className="mt-8 text-center py-4">
+              <div ref={sentinelRef} role="status" aria-live="polite" aria-busy={loading} className="mt-8 text-center py-4">
                 {loading && (
                   <div className="flex items-center justify-center gap-2">
                     <div className="h-2 w-2 rounded-full bg-mint animate-pulse" />
