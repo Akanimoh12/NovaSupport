@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useRef } from "react";
 
 interface UseInfiniteScrollOptions {
   onLoadMore: () => void;
@@ -13,38 +13,41 @@ export function useInfiniteScroll({
   isLoading,
   threshold = 0.8,
 }: UseInfiniteScrollOptions) {
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-
   // Keep a ref to the latest values so the stable intersection callback
   // always sees current state without being recreated on every change.
   const stateRef = useRef({ hasMore, isLoading, onLoadMore });
   stateRef.current = { hasMore, isLoading, onLoadMore };
 
-  useEffect(() => {
-    const options: IntersectionObserverInit = {
-      root: null,
-      rootMargin: "0px",
-      threshold,
-    };
+  // A ref callback is used instead of useRef + useEffect so that the observer
+  // attaches exactly when the sentinel element mounts and detaches when it
+  // unmounts. useEffect only runs on mount — if the sentinel is behind a
+  // conditional (e.g. "hasMore && profiles.length > 0") the element doesn't
+  // exist yet and the effect never re-runs when it eventually appears.
+  const sentinelRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (!node) return;
 
-    // Stable callback — reads from the ref, never recreated due to state changes.
-    const observer = new IntersectionObserver((entries) => {
-      const [entry] = entries;
-      if (entry.isIntersecting && stateRef.current.hasMore && !stateRef.current.isLoading) {
-        stateRef.current.onLoadMore();
-      }
-    }, options);
+      const observer = new IntersectionObserver(
+        (entries) => {
+          const [entry] = entries;
+          if (
+            entry.isIntersecting &&
+            stateRef.current.hasMore &&
+            !stateRef.current.isLoading
+          ) {
+            stateRef.current.onLoadMore();
+          }
+        },
+        { root: null, rootMargin: "0px", threshold }
+      );
 
-    const currentSentinel = sentinelRef.current;
-    if (currentSentinel) {
-      observer.observe(currentSentinel);
-    }
+      observer.observe(node);
 
-    return () => {
-      // disconnect() releases the observer entirely, not just one target.
-      observer.disconnect();
-    };
-  }, [threshold]); // only rebuilds if the intersection threshold itself changes
+      // Return a cleanup that React will call when the element unmounts.
+      return () => observer.disconnect();
+    },
+    [threshold] // only rebuilds if the intersection threshold itself changes
+  );
 
   return sentinelRef;
 }

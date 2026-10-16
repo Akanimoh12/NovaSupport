@@ -651,6 +651,17 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       },
       // Required so browsers send the auth_token httpOnly cookie (#759)
       credentials: true,
+      // Expose rate-limit headers so the frontend's parseRateLimitInfo() helper
+      // can read them cross-origin (#1319). Without this list, the CORS spec
+      // only allows browsers to access the 7 "safe" response headers — none of
+      // the custom rate-limit headers qualify, so they all return null and the
+      // "retry in N seconds" UI message is dead code in production.
+      exposedHeaders: [
+        "RateLimit-Limit",
+        "RateLimit-Remaining",
+        "RateLimit-Reset",
+        "Retry-After",
+      ],
     }),
   );
   // Parse cookie header so req.cookies.auth_token is available in requireAuth (#759)
