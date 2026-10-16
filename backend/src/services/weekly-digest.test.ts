@@ -1,6 +1,6 @@
 import { test, mock } from "node:test";
 import assert from "node:assert/strict";
-import { sendWeeklyDigests } from "./weekly-digest.js";
+import { sendWeeklyDigests, maybeRunWeeklyDigest } from "./weekly-digest.js";
 import { escapeHtml } from "./email.js";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -219,4 +219,62 @@ test("escapeHtml neutralises double-quote in assetCode", () => {
 test("escapeHtml leaves clean strings unchanged", () => {
   assert.equal(escapeHtml("XLM"), "XLM");
   assert.equal(escapeHtml("USDC"), "USDC");
+});
+
+// ── issue #1349: claim persisted before the run completes ─────────────────────
+
+type SchedulerPrismaMock = {
+  prismaClient: {
+    $queryRaw: ReturnType<typeof mock.fn>;
+    schedulerJob: { updateMany: ReturnType<typeof mock.fn> };
+  };
+  queryRaw: ReturnType<typeof mock.fn>;
+  updateMany: ReturnType<typeof mock.fn>;
+};
+
+function buildSchedulerPrismaMock(options: { claimed?: boolean } = {}): SchedulerPrismaMock {
+  const queryRaw = mock.fn(() =>
+    Promise.resolve(options.claimed === false ? [] : [{ name: "weekly-digest" }]),
+  );
+  const updateMany = mock.fn(() => Promise.resolve({ count: 1 }));
+  return {
+    prismaClient: { $queryRaw: queryRaw, schedulerJob: { updateMany } },
+    queryRaw,
+    updateMany,
+  };
+}
+
+test("a successful run keeps its claim", async () => {
+  const { prismaClient, updateMany } = buildSchedulerPrismaMock();
+  const sendDigests = mock.fn(() => Promise.resolve());
+
+  await maybeRunWeeklyDigest(prismaClient as never, sendDigests as never);
+
+  assert.equal(sendDigests.mock.calls.length, 1);
+  assert.equal(updateMany.mock.calls.length, 0, "a completed run must not release its claim");
+});
+
+test("a failed run releases the claim so the next tick can retry", async () => {
+  const { prismaClient, updateMany } = buildSchedulerPrismaMock();
+  const sendDigests = mock.fn(() => Promise.reject(new Error("db pool exhausted")));
+
+  await assert.rejects(() => maybeRunWeeklyDigest(prismaClient as never, sendDigests as never));
+
+  assert.equal(updateMany.mock.calls.length, 1, "the claim must be given back after a failure");
+  const [args] = updateMany.mock.calls[0]!.arguments as [{ where: { name: string }; data: { lastRunAt: Date } }];
+  assert.equal(args.where.name, "weekly-digest");
+  assert.ok(
+    args.data.lastRunAt.getTime() < Date.now(),
+    "released lastRunAt must be due immediately",
+  );
+});
+
+test("no claim means no send and no release", async () => {
+  const { prismaClient, updateMany } = buildSchedulerPrismaMock({ claimed: false });
+  const sendDigests = mock.fn(() => Promise.resolve());
+
+  await maybeRunWeeklyDigest(prismaClient as never, sendDigests as never);
+
+  assert.equal(sendDigests.mock.calls.length, 0);
+  assert.equal(updateMany.mock.calls.length, 0);
 });

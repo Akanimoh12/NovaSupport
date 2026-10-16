@@ -166,6 +166,7 @@ export async function sendWeeklyDigests(
 
 const WEEKLY_DIGEST_JOB_NAME = "weekly-digest";
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+const DIGEST_RETRY_DELAY_MS = 60 * 60 * 1000;
 
 async function claimWeeklyDigestRun(
   prismaClient = prisma,
@@ -184,36 +185,85 @@ async function claimWeeklyDigestRun(
 }
 
 /**
- * Claim and run the weekly digest only if at least 7 days have elapsed since
- * the previous claim.
+ * Hand a claim back when the run it covered never completed. Without this the
+ * persisted "last run" would suppress the next attempt for a full week, silently
+ * skipping the week's digest after a single early failure (#1349).
+ *
+ * The write is guarded on `lastRunAt` still holding the value we claimed with, so
+ * a run that already handed off to a newer claim cannot roll that one back.
  */
-async function maybeRunWeeklyDigest(): Promise<void> {
+async function releaseWeeklyDigestClaim(
+  claimedAt: Date,
+  prismaClient = prisma,
+): Promise<boolean> {
+  const result = await prismaClient.schedulerJob.updateMany({
+    where: { name: WEEKLY_DIGEST_JOB_NAME, lastRunAt: claimedAt },
+    data: { lastRunAt: new Date(0) },
+  });
+  return result.count > 0;
+}
+
+/**
+ * Claim and run the weekly digest only if at least 7 days have elapsed since
+ * the previous claim. If the run fails, the claim is released so the retry
+ * (scheduled by the scheduler) is immediately due again.
+ */
+export async function maybeRunWeeklyDigest(
+  prismaClient = prisma,
+  sendDigests: typeof sendWeeklyDigests = sendWeeklyDigests,
+): Promise<void> {
   const runAt = new Date();
-  if (!(await claimWeeklyDigestRun(prisma, runAt))) {
+  if (!(await claimWeeklyDigestRun(prismaClient, runAt))) {
     logger.info("Weekly digest skipped — not yet due or already claimed");
     return;
   }
 
-  await sendWeeklyDigests();
+  try {
+    await sendDigests();
+  } catch (err) {
+    logger.error({ err }, "Weekly digest run failed — releasing claim so it can be retried");
+    try {
+      await releaseWeeklyDigestClaim(runAt, prismaClient);
+    } catch (releaseErr) {
+      logger.error({ err: releaseErr }, "Failed to release weekly digest claim");
+    }
+    throw err;
+  }
 }
 
 let digestInterval: ReturnType<typeof setInterval> | null = null;
+let digestRetryTimeout: ReturnType<typeof setTimeout> | null = null;
+
+function clearDigestRetry(): void {
+  if (digestRetryTimeout) {
+    clearTimeout(digestRetryTimeout);
+    digestRetryTimeout = null;
+  }
+}
 
 export function startWeeklyDigestScheduler() {
   if (process.env.WEEKLY_DIGEST_ENABLED === "true") {
     logger.info("Weekly digest scheduler enabled. Starting...");
 
+    const tick = () => {
+      maybeRunWeeklyDigest().catch((err) => {
+        logger.error({ err }, "Error in weekly digest run");
+        // The claim was released, so the digest is due again — retry on a short
+        // delay instead of waiting out the full weekly interval (#1349).
+        if (digestRetryTimeout) return;
+        digestRetryTimeout = setTimeout(() => {
+          digestRetryTimeout = null;
+          tick();
+        }, DIGEST_RETRY_DELAY_MS);
+        digestRetryTimeout.unref?.();
+      });
+    };
+
     // Check the persisted last-run time before firing so that a restart or
     // rolling deploy does not immediately re-send digests (#592).
-    maybeRunWeeklyDigest().catch((err) => {
-      logger.error({ err }, "Error in initial maybeRunWeeklyDigest check");
-    });
+    tick();
 
-    digestInterval = setInterval(() => {
-      maybeRunWeeklyDigest().catch((err) => {
-        logger.error({ err }, "Error in maybeRunWeeklyDigest interval");
-      });
-    }, SEVEN_DAYS_MS);
+    digestInterval = setInterval(tick, SEVEN_DAYS_MS);
   } else {
     logger.info("Weekly digest scheduler disabled. Set WEEKLY_DIGEST_ENABLED=true to enable.");
   }
@@ -224,4 +274,5 @@ export function stopWeeklyDigestScheduler() {
     clearInterval(digestInterval);
     digestInterval = null;
   }
+  clearDigestRetry();
 }
