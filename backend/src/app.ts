@@ -27,7 +27,7 @@ import {
 } from "./auth.js";
 import multer from "multer";
 import { createClient } from "@supabase/supabase-js";
-import { sendSupportReceivedEmail, escapeHtml } from "./services/email.js";
+import { sendSupportReceivedEmail, sendMilestoneReachedEmail, escapeHtml } from "./services/email.js";
 import { sendVerificationEmail } from "./emails/verify-email.js";
 import {
   getCachedLeaderboard,
@@ -2602,7 +2602,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
   // ── Support transactions ───────────────────────────────────────────────
 
   const supportPayloadSchema = z.object({
-    txHash: z.string().min(3),
+    txHash: z.string().length(64).regex(/^[0-9a-f]{64}$/i, "txHash must be a 64-character hex string"),
     amount: z.string()
       .regex(/^\d+(\.\d{1,7})?$/, "amount must be a positive decimal with up to 7 decimal places")
       .refine(v => parseFloat(v) > 0, "amount must be greater than zero"),
@@ -3490,6 +3490,33 @@ All errors return JSON with an \`error\` field and optional \`code\`:
                     reachedAt: milestone.reachedAt ?? new Date(),
                   },
                 });
+
+                // Send milestone-reached email notification (async, best-effort)
+                (async () => {
+                  try {
+                    const profile = await prisma.profile.findUnique({
+                      where: { id: milestone.profileId },
+                      include: { notificationPreferences: true },
+                    });
+
+                    const notifyOnMilestone =
+                      profile?.notificationPreferences?.notifyOnMilestone ?? true;
+
+                    if (profile?.email && profile.emailVerified && notifyOnMilestone) {
+                      await sendMilestoneReachedEmail({
+                        to: profile.email,
+                        milestoneName: milestone.name,
+                        targetAmount: milestone.targetAmount.toString(),
+                        assetCode: milestone.assetCode,
+                      });
+                    }
+                  } catch (err) {
+                    logger.error(
+                      { err, milestoneId: milestone.id },
+                      "Failed to send milestone-reached email",
+                    );
+                  }
+                })();
               }
             }
           }

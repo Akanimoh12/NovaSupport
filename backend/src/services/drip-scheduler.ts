@@ -146,6 +146,25 @@ function runDripSchedulerTick(): void {
 }
 
 export function startDripScheduler(): SchedulerHandle {
+  // Guard against re-entry: return handle to existing scheduler if already running
+  if (dripInterval !== null && !dripStopped) {
+    logger.warn("Drip scheduler already running, returning existing handle");
+    return {
+      async stop() {
+        if (dripStopped) return;
+        dripStopped = true;
+        if (dripInterval) {
+          clearInterval(dripInterval);
+          dripInterval = null;
+        }
+        if (dripInFlight) {
+          await dripInFlight;
+        }
+        logger.info("Drip scheduler stopped.");
+      },
+    };
+  }
+
   if (process.env.DRIP_SCHEDULER_ENABLED === "true") {
     logger.info("Drip scheduler enabled. Starting...");
     dripStopped = false;

@@ -22,8 +22,9 @@ function createRedisClient(): RedisClient | null {
     const redis = new IORedisClass(url, {
       maxRetriesPerRequest: 3,
       retryStrategy(times: number) {
-        if (times > 3) return null;
-        return Math.min(times * 200, 2000);
+        // Allow much longer retry periods to survive Redis maintenance windows
+        if (times > 50) return null; // Stop after ~50 attempts (~100 seconds total)
+        return Math.min(times * 200, 2000); // Exponential backoff up to 2s
       },
       enableReadyCheck: true,
       lazyConnect: true,
