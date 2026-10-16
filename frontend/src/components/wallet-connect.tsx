@@ -103,6 +103,7 @@ export function WalletConnect({ onConnect }: WalletConnectProps = {}) {
   function disconnectWallet() {
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(STORAGE_WALLET_ID);
+    window.dispatchEvent(new Event("wallet-disconnected"));
     setAddress(null);
     setActiveWallet(null);
     setError(null);
