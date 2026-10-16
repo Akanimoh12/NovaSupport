@@ -187,7 +187,8 @@ async function getMilestones(username: string): Promise<Milestone[]> {
   });
   if (!res.ok) return [];
   const body = await res.json();
-  return body.milestones ?? body ?? [];
+  const milestones = body.milestones ?? body;
+  return Array.isArray(milestones) ? milestones : [];
 }
 
 async function getBadges(username: string): Promise<Badge[]> {
