@@ -123,6 +123,7 @@ Errors:
 - `MessageTooLong` (5) - `message` exceeds 280 characters.
 - `InvalidAssetCode` (6) - `asset_code` is empty or exceeds 12 characters.
 - `InsufficientBalance` (300) - Supporter does not have enough tokens.
+- `Overflow` (302) - Arithmetic overflow in balance calculation.
 - `ContractNotInitialized` (201) - Contract has not been initialized.
 - `ContractPaused` (200) - Contract is paused.
 - Soroban auth failure - If `supporter` does not authorize the call.
@@ -167,6 +168,7 @@ Errors:
 - `ZeroBalance` (403) - Recipient's recorded balance is zero.
 - `WithdrawAmountExceedsBalance` (303) - Requested amount exceeds recipient's recorded balance.
 - `InsufficientContractBalance` (301) - Contract does not hold enough tokens.
+- `Overflow` (302) - Arithmetic overflow in balance calculation.
 - Soroban auth failure - If `caller` does not authorize the call.
 
 ### `support_count(env) -> u32`
@@ -280,31 +282,32 @@ Event fields (tuple):
 
 ## Storage Keys
 
-| Key | Type | Description |
-| --- | --- | --- |
-| `SupportCount` | `u32` | Global count of successful `support()` calls stored in persistent storage. |
-| `RecipientCount(Address)` | `u32` | Per-recipient count of support actions received. |
-| `RecipientTotal(Address, Address)` | `i128` | Per-recipient, per-asset total amount received (reduced by withdrawals). Keyed by recipient address and asset token contract (first address is recipient, second is asset), representing a per-asset total rather than an aggregate across assets. |
-| `Admin` | `Address` | Contract administrator address. Set during `initialize()`. |
-| `Paused` | `bool` | Whether the contract is paused. Toggled by `pause()` / `unpause()`. |
+| Key                                | Type      | Description                                                                                                                                                                                                                                        |
+| ---------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SupportCount`                     | `u32`     | Global count of successful `support()` calls stored in persistent storage.                                                                                                                                                                         |
+| `RecipientCount(Address)`          | `u32`     | Per-recipient count of support actions received.                                                                                                                                                                                                   |
+| `RecipientTotal(Address, Address)` | `i128`    | Per-recipient, per-asset total amount received (reduced by withdrawals). Keyed by recipient address and asset token contract (first address is recipient, second is asset), representing a per-asset total rather than an aggregate across assets. |
+| `Admin`                            | `Address` | Contract administrator address. Set during `initialize()`.                                                                                                                                                                                         |
+| `Paused`                           | `bool`    | Whether the contract is paused. Toggled by `pause()` / `unpause()`.                                                                                                                                                                                |
 
 ## Error Codes
 
 The contract defines a `#[contracterror]` enum with the following numeric variants:
 
-| Error | Value | Meaning |
-| --- | --- | --- |
-| `ZeroAmount` | 2 | `amount` is zero in `support()` or `withdraw()`. |
-| `NegativeAmount` | 3 | `amount` is negative in `support()` or `withdraw()`. |
-| `EmptyMessage` | 4 | `message` is empty in `support()`. |
-| `MessageTooLong` | 5 | `message` exceeds 280 characters in `support()`. |
-| `InvalidAssetCode` | 6 | `asset_code` is empty or exceeds 12 characters in `support()`. |
-| `NotRecipient` | 102 | `caller` is not the same as `recipient` in `withdraw()`. |
-| `ContractPaused` | 200 | Contract is paused; `support()` or `withdraw()` rejected. |
-| `ContractNotInitialized` | 201 | Contract has not been initialized. |
-| `AlreadyInitialized` | 202 | `initialize()` called more than once. |
-| `InsufficientBalance` | 300 | Supporter does not have enough tokens. |
-| `InsufficientContractBalance` | 301 | Contract does not hold enough tokens for withdrawal. |
-| `WithdrawAmountExceedsBalance` | 303 | Requested withdrawal exceeds recipient's recorded balance. |
-| `RecipientNotFound` | 402 | Recipient has never received support. |
-| `ZeroBalance` | 403 | Recipient's recorded balance is zero. |
+| Error                          | Value | Meaning                                                          |
+| ------------------------------ | ----- | ---------------------------------------------------------------- |
+| `ZeroAmount`                   | 2     | `amount` is zero in `support()` or `withdraw()`.                 |
+| `NegativeAmount`               | 3     | `amount` is negative in `support()` or `withdraw()`.             |
+| `EmptyMessage`                 | 4     | `message` is empty in `support()`.                               |
+| `MessageTooLong`               | 5     | `message` exceeds 280 characters in `support()`.                 |
+| `InvalidAssetCode`             | 6     | `asset_code` is empty or exceeds 12 characters in `support()`.   |
+| `NotRecipient`                 | 102   | `caller` is not the same as `recipient` in `withdraw()`.         |
+| `ContractPaused`               | 200   | Contract is paused; `support()` or `withdraw()` rejected.        |
+| `ContractNotInitialized`       | 201   | Contract has not been initialized.                               |
+| `AlreadyInitialized`           | 202   | `initialize()` called more than once.                            |
+| `InsufficientBalance`          | 300   | Supporter does not have enough tokens.                           |
+| `InsufficientContractBalance`  | 301   | Contract does not hold enough tokens for withdrawal.             |
+| `Overflow`                     | 302   | Arithmetic overflow in balance calculation (checked arithmetic). |
+| `WithdrawAmountExceedsBalance` | 303   | Requested withdrawal exceeds recipient's recorded balance.       |
+| `RecipientNotFound`            | 402   | Recipient has never received support.                            |
+| `ZeroBalance`                  | 403   | Recipient's recorded balance is zero.                            |
