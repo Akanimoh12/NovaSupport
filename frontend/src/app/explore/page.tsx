@@ -21,6 +21,7 @@ type AssetFilter = string;
 
 export default function ExplorePage() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [filterProfiles, setFilterProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sort, setSort] = useState<SortOption>("newest");
@@ -50,9 +51,22 @@ export default function ExplorePage() {
   }, [sort, asset, assetIssuer]);
 
   useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_BASE_URL}/profiles?limit=100&offset=0&sort=newest`)
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error("Failed to fetch filter options")))
+      .then((data) => {
+        if (!cancelled) setFilterProfiles(Array.isArray(data.profiles) ? data.profiles : []);
+      })
+      .catch(() => {
+        if (!cancelled) setFilterProfiles([]);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
     const assetCodes = new Set<string>();
     const issuers = new Set<string>();
-    profiles.forEach((p) => {
+    filterProfiles.forEach((p) => {
       p.acceptedAssets.forEach((a) => {
         assetCodes.add(a.code);
         if (a.issuer) {
@@ -60,8 +74,7 @@ export default function ExplorePage() {
         }
       });
     });
-    const uniqueAssets = Array.from(assetCodes).sort();
-    setAvailableAssets(uniqueAssets);
+    setAvailableAssets(Array.from(assetCodes).sort());
     const unique = Array.from(issuers)
       .map((str) => {
         const [code, issuer] = str.split(":");
@@ -69,7 +82,7 @@ export default function ExplorePage() {
       })
       .sort((a, b) => a.code.localeCompare(b.code) || a.issuer.localeCompare(b.issuer));
     setAvailableIssuers(unique);
-  }, [profiles]);
+  }, [filterProfiles]);
 
   async function fetchProfiles(currentOffset: number, reset = false) {
     abortControllerRef.current?.abort();

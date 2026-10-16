@@ -225,6 +225,14 @@ export default async function ProfilePage({ params }: PageProps) {
       })()
     : null;
 
+  const dominantAssetTotal = stats?.assetTotals?.length
+    ? stats.assetTotals.reduce(
+        (dominant, current) =>
+          Number(current.total) > Number(dominant.total) ? current : dominant,
+        stats.assetTotals[0],
+      )
+    : undefined;
+
   const sameAs = [
     profile.websiteUrl,
     profile.twitterHandle
@@ -389,8 +397,8 @@ export default async function ProfilePage({ params }: PageProps) {
               <div className="flex items-center justify-between">
                 <span className="text-sm text-sky/60">Total Raised</span>
                 <span className="text-sm font-bold text-white">
-                  {stats?.assetTotals?.[0]?.total || "0"}{" "}
-                  {stats?.assetTotals?.[0]?.assetCode || "XLM"}
+                  {dominantAssetTotal?.total || "0"}{" "}
+                  {dominantAssetTotal?.assetCode || "XLM"}
                 </span>
               </div>
               <div className="flex items-center justify-between">
