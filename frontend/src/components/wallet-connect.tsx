@@ -31,7 +31,28 @@ export function WalletConnect({ onConnect }: WalletConnectProps = {}) {
   const [connectingWalletId, setConnectingWalletId] = useState<WalletId | null>(null);
 
   useEffect(() => {
-    setAvailable(getAvailableWallets());
+    // Wallet extensions inject their global object asynchronously — checking
+    // only once on mount races against that injection and loses on first load.
+    // Strategy: re-check on window `load` (all scripts done) and after two
+    // short delays (100 ms catches fast injectors, 1 000 ms catches slow ones).
+    // Any signal that fires after a wallet appears will update the list without
+    // requiring a manual refresh.
+    function refresh() {
+      setAvailable(getAvailableWallets());
+    }
+
+    refresh(); // synchronous best-effort check on mount
+
+    const t1 = setTimeout(refresh, 100);
+    const t2 = setTimeout(refresh, 1000);
+
+    window.addEventListener("load", refresh);
+
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      window.removeEventListener("load", refresh);
+    };
   }, []);
 
   useEffect(() => {
