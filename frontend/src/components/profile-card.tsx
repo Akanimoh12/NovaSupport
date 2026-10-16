@@ -6,8 +6,10 @@ import { useToast } from "@/lib/use-toast";
 import { API_BASE_URL, SITE_URL } from "@/lib/config";
 import { apiFetch } from "@/lib/api-client";
 import { getStoredWalletAddress } from "@/lib/wallet-adapters";
+import { QrCode } from "lucide-react";
 
 import { ProfileCardSkeleton } from "./skeleton";
+import { QRModal } from "./qr-modal";
 
 type Asset = {
   code: string;
@@ -52,6 +54,7 @@ export function ProfileCard({
 }: ProfileCardProps & { isVerified?: boolean }) {
   const [copied, setCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [showQR, setShowQR] = useState(false);
   const [resending, setResending] = useState(false);
   const [resendSent, setResendSent] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
@@ -254,7 +257,15 @@ export function ProfileCard({
               >
                 𝕏 Share on X
               </a>
+              <button
+                onClick={() => setShowQR(true)}
+                className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-medium text-white hover:bg-white/10 transition-colors flex items-center gap-1.5"
+                aria-label="Show QR code"
+              >
+                <QrCode size={13} /> QR Code
+              </button>
             </div>
+            {showQR && <QRModal url={profileUrl} onClose={() => setShowQR(false)} />}
 
             {hasSocialLinks && (
               <div className="mt-4 flex flex-wrap gap-3">
