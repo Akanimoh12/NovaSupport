@@ -13,6 +13,79 @@ import {
 
 const MAX_DELIVERY_ATTEMPTS = 3;
 
+/**
+ * A delivery is claimed by flipping its status to "processing" before the HTTP
+ * request is made. If the final status write fails after that claim (process
+ * kill, DB blip, worker crash), nothing ever looks at the row again and the
+ * delivery is dropped forever. A delivery attempt itself is capped at
+ * DELIVERY_TIMEOUT_MS (10s), so anything still "processing" well past that was
+ * orphaned by a failed final write.
+ */
+export const DEFAULT_PROCESSING_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
+ * Return deliveries stuck in "processing" to the pending pool so the normal
+ * claim-and-deliver path can retry them. Deliveries that have already burned
+ * every attempt are marked failed instead of being retried forever.
+ */
+export async function reclaimStuckWebhookDeliveries(
+  prismaClient = prisma,
+  now = new Date(),
+  timeoutMs: number = Number(
+    process.env.WEBHOOK_PROCESSING_TIMEOUT_MS ?? DEFAULT_PROCESSING_TIMEOUT_MS,
+  ),
+): Promise<number> {
+  const stuckBefore = new Date(now.getTime() - timeoutMs);
+
+  // updatedAt is bumped by the claim write, so it marks when processing began.
+  const stuck = await prismaClient.webhookDelivery.findMany({
+    where: { status: "processing", updatedAt: { lte: stuckBefore } },
+    select: { id: true, attemptCount: true },
+    take: 100,
+  });
+
+  if (stuck.length === 0) return 0;
+
+  const exhausted = stuck.filter((d) => d.attemptCount >= MAX_DELIVERY_ATTEMPTS);
+  const retryable = stuck.filter((d) => d.attemptCount < MAX_DELIVERY_ATTEMPTS);
+
+  if (exhausted.length > 0) {
+    await prismaClient.webhookDelivery.updateMany({
+      where: { id: { in: exhausted.map((d) => d.id) }, status: "processing" },
+      data: {
+        status: "failed",
+        nextRetryAt: null,
+        lastError: "Delivery stuck in processing and reclaimed after max attempts",
+      },
+    });
+  }
+
+  let reclaimed = 0;
+  for (const delivery of retryable) {
+    // Still guarded on status: a row that finished between the read and this
+    // write must not be dragged back into pending.
+    const result = await prismaClient.webhookDelivery.updateMany({
+      where: { id: delivery.id, status: "processing", updatedAt: { lte: stuckBefore } },
+      data: {
+        status: "pending",
+        nextRetryAt: now,
+        lastError: "Delivery reclaimed after being stuck in processing",
+      },
+    });
+    reclaimed += result.count;
+  }
+
+  if (reclaimed > 0 || exhausted.length > 0) {
+    logger.warn(
+      { reclaimed, failed: exhausted.length, timeoutMs },
+      "Reclaimed webhook deliveries stuck in processing",
+    );
+    Metrics.webhookDeliveryErrors();
+  }
+
+  return reclaimed + exhausted.length;
+}
+
 export async function processPendingWebhookDeliveries(
   prismaClient = prisma,
   deliver = deliverWebhook,
@@ -107,6 +180,7 @@ type ProcessorOptions = {
   redisAvailable?: boolean;
   intervalMs?: number;
   processPending?: typeof processPendingWebhookDeliveries;
+  reclaimStuck?: typeof reclaimStuckWebhookDeliveries;
   startQueue?: typeof createWebhookQueue;
   startWorker?: typeof createWebhookWorker;
 };
@@ -114,6 +188,7 @@ type ProcessorOptions = {
 export function startWebhookProcessor(options: ProcessorOptions = {}): WebhookProcessorHandle {
   const redisAvailable = options.redisAvailable ?? getIsRedisAvailable();
   const processPending = options.processPending ?? processPendingWebhookDeliveries;
+  const reclaimStuck = options.reclaimStuck ?? reclaimStuckWebhookDeliveries;
   const interval = options.intervalMs ?? Number(process.env.WEBHOOK_PROCESSOR_INTERVAL_MS ?? 10000);
 
   if (redisAvailable) {
@@ -126,17 +201,23 @@ export function startWebhookProcessor(options: ProcessorOptions = {}): WebhookPr
   // BullMQ and the poller share the same atomic status claim.
   logger.info({ interval, redisAvailable }, "Starting DB-polled webhook processor");
   processorStopped = false;
-  processorInterval = setInterval(() => {
-    if (!processorInFlight) {
-      processorInFlight = processPending()
-        .catch((err) => {
-          logger.error({ err }, "Error in webhook processor run");
-        })
-        .finally(() => {
-          processorInFlight = null;
-        });
-    }
-  }, interval);
+
+  const runSweep = () => {
+    if (processorInFlight) return;
+    processorInFlight = Promise.resolve()
+      // Reclaim first: rows orphaned in "processing" by a failed final write
+      // must go back to pending before this tick selects anything (#1351).
+      .then(() => reclaimStuck())
+      .then(() => processPending())
+      .catch((err) => {
+        logger.error({ err }, "Error in webhook processor run");
+      })
+      .finally(() => {
+        processorInFlight = null;
+      });
+  };
+
+  processorInterval = setInterval(runSweep, interval);
 
   return {
     async stop() {
