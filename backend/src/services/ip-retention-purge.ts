@@ -1,5 +1,6 @@
 import { prisma } from "../db.js";
 import { logger } from "../logger.js";
+import { claimScheduledJob, releaseScheduledJobClaim } from "./scheduler-claim.js";
 
 const RETENTION_PURGE_JOB_NAME = "ip-retention-purge";
 const REVOKED_TOKEN_PURGE_JOB_NAME = "revoked-token-purge";
@@ -39,64 +40,47 @@ export async function purgeExpiredRevokedTokens(prismaClient = prisma, now = new
   return result.count;
 }
 
-async function getLastPurgeRunAt(): Promise<Date | null> {
-  const row = await prisma.schedulerJob.findUnique({
-    where: { name: RETENTION_PURGE_JOB_NAME },
-  });
-  return row?.lastRunAt ?? null;
-}
-
-async function markPurgeRunAt(at: Date): Promise<void> {
-  await prisma.schedulerJob.upsert({
-    where: { name: RETENTION_PURGE_JOB_NAME },
-    create: { name: RETENTION_PURGE_JOB_NAME, lastRunAt: at },
-    update: { lastRunAt: at },
-  });
-}
-
-/**
- * Run the purge only if at least 24h have elapsed since the last successful
- * run, so a process restart doesn't re-run it immediately.
- */
 async function maybeRunPurge(): Promise<void> {
-  const lastRunAt = await getLastPurgeRunAt();
-  const now = Date.now();
+  const runAt = new Date();
 
-  if (lastRunAt !== null && now - lastRunAt.getTime() < PURGE_INTERVAL_MS) {
+  if (!(await claimScheduledJob(RETENTION_PURGE_JOB_NAME, PURGE_INTERVAL_MS, prisma, runAt))) {
+    logger.debug("IP retention purge skipped — not yet due or already claimed");
     return;
   }
 
-  const runAt = new Date(now);
-  await purgeExpiredReporterIps();
-  await markPurgeRunAt(runAt);
-}
-
-async function getLastRevokedTokenPurgeRunAt(): Promise<Date | null> {
-  const row = await prisma.schedulerJob.findUnique({
-    where: { name: REVOKED_TOKEN_PURGE_JOB_NAME },
-  });
-  return row?.lastRunAt ?? null;
-}
-
-async function markRevokedTokenPurgeRunAt(at: Date): Promise<void> {
-  await prisma.schedulerJob.upsert({
-    where: { name: REVOKED_TOKEN_PURGE_JOB_NAME },
-    create: { name: REVOKED_TOKEN_PURGE_JOB_NAME, lastRunAt: at },
-    update: { lastRunAt: at },
-  });
+  try {
+    await purgeExpiredReporterIps();
+  } catch (err) {
+    await releaseScheduledJobClaim(RETENTION_PURGE_JOB_NAME, runAt).catch((releaseErr) => {
+      logger.error({ err: releaseErr }, "Failed to release IP retention purge claim");
+    });
+    throw err;
+  }
 }
 
 async function maybeRunRevokedTokenPurge(): Promise<void> {
-  const lastRunAt = await getLastRevokedTokenPurgeRunAt();
-  const now = Date.now();
+  const runAt = new Date();
 
-  if (lastRunAt !== null && now - lastRunAt.getTime() < REVOKED_TOKEN_PURGE_INTERVAL_MS) {
+  if (
+    !(await claimScheduledJob(
+      REVOKED_TOKEN_PURGE_JOB_NAME,
+      REVOKED_TOKEN_PURGE_INTERVAL_MS,
+      prisma,
+      runAt,
+    ))
+  ) {
+    logger.debug("Revoked token purge skipped — not yet due or already claimed");
     return;
   }
 
-  const runAt = new Date(now);
-  await purgeExpiredRevokedTokens();
-  await markRevokedTokenPurgeRunAt(runAt);
+  try {
+    await purgeExpiredRevokedTokens();
+  } catch (err) {
+    await releaseScheduledJobClaim(REVOKED_TOKEN_PURGE_JOB_NAME, runAt).catch((releaseErr) => {
+      logger.error({ err: releaseErr }, "Failed to release revoked token purge claim");
+    });
+    throw err;
+  }
 }
 
 let purgeInterval: ReturnType<typeof setInterval> | null = null;
