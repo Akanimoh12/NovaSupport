@@ -115,11 +115,20 @@ import {
   startRevokedTokenPurgeScheduler,
   stopRevokedTokenPurgeScheduler,
 } from "./services/ip-retention-purge.js";
+import {
+  startBadgeSweepScheduler,
+  stopBadgeSweepScheduler,
+} from "./services/badge-awarder.js";
 import { prisma } from "./db.js";
 import { connectRedis, disconnectRedis } from "./services/redis.js";
+import { resolveStellarNetwork } from "./network.js";
 
 const port = Number(process.env.PORT ?? 4000);
-const indexerNetwork = process.env.INDEXER_NETWORK ?? "TESTNET";
+// Derive the indexer's network from the same source of truth used by the rest
+// of the backend (API responses, email links) instead of a separate variable,
+// so switching the active network can't leave the indexer tagging rows with the
+// wrong network label (#1353).
+const indexerNetwork = resolveStellarNetwork();
 const contractId =
   process.env.SOROBAN_CONTRACT_ID ??
   process.env.CONTRACT_ID ??
@@ -171,6 +180,10 @@ const server = app.listen(port, () => {
   // Start the revoked token purge scheduler
   startRevokedTokenPurgeScheduler();
 
+  // Start the badge sweep safety net (re-awards badges missed by the reactive
+  // post-transaction check)
+  startBadgeSweepScheduler();
+
   // Start the webhook delivery processor
   webhookProcessor = startWebhookProcessor();
 
@@ -201,6 +214,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
       Promise.resolve().then(() => stopWeeklyDigestScheduler()),
       Promise.resolve().then(() => stopIpRetentionPurgeScheduler()),
       Promise.resolve().then(() => stopRevokedTokenPurgeScheduler()),
+      Promise.resolve().then(() => stopBadgeSweepScheduler()),
     ]);
 
     await new Promise<void>((resolve, reject) => {

@@ -1,4 +1,5 @@
 import { sendEmail } from "../mailer.js";
+import { stellarExplorerNetwork } from "../network.js";
 
 export function escapeHtml(s: string): string {
   return s
@@ -32,7 +33,7 @@ export async function sendSupportReceivedEmail({
     ? `${fromAddress.slice(0, 4)}...${fromAddress.slice(-4)}`
     : fromAddress;
 
-  const network = process.env.STELLAR_NETWORK === "PUBLIC" ? "public" : "testnet";
+  const network = stellarExplorerNetwork();
   const stellarExpertLink = `https://stellar.expert/explorer/${network}/tx/${txHash}`;
 
   const html = `
