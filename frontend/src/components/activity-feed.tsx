@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   TrendingUp,
   Send,
@@ -11,9 +12,8 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import Link from "next/link";
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
+import { API_BASE_URL } from "@/lib/config";
+import { stellarExpertUrl } from "@/lib/stellar";
 
 type ActivityItem = {
   id: string;
@@ -21,7 +21,6 @@ type ActivityItem = {
   title: string;
   description: string;
   timestamp: string;
-  icon: React.ReactNode;
   metadata?: {
     amount?: string;
     assetCode?: string;
@@ -74,99 +73,90 @@ type ActivityFeedProps = {
   limit?: number;
 };
 
-export function ActivityFeed({ username, limit = 10 }: ActivityFeedProps) {
-  const [activities, setActivities] = useState<ActivityItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [milestonesUnavailable, setMilestonesUnavailable] = useState(false);
-  const [displayedItems, setDisplayedItems] = useState(limit);
-  const [hasMore, setHasMore] = useState(false);
+async function fetchActivities(username: string, signal?: AbortSignal): Promise<{
+  items: ActivityItem[];
+  milestonesUnavailable: boolean;
+}> {
+  const [transactionsRes, milestonesRes] = await Promise.all([
+    fetch(`${API_BASE_URL}/profiles/${username}/transactions?limit=100`, { signal }),
+    fetch(`${API_BASE_URL}/profiles/${username}/milestones`, { signal }).catch(() => null),
+  ]);
 
-  useEffect(() => {
-    fetchActivities();
-  }, [username]);
+  const transactionsData = transactionsRes.ok
+    ? await transactionsRes.json()
+    : { transactions: [] };
 
-  async function fetchActivities() {
+  let milestonesUnavailable = milestonesRes?.ok !== true;
+  let milestonesData = { milestones: [] };
+
+  if (!milestonesUnavailable) {
     try {
-      setLoading(true);
-      setError(null);
-      setMilestonesUnavailable(false);
-
-      const [transactionsRes, milestonesRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/profiles/${username}/transactions?limit=100`),
-        fetch(`${API_BASE_URL}/profiles/${username}/milestones`).catch(() => null),
-      ]);
-
-      const transactionsData = transactionsRes.ok
-        ? await transactionsRes.json()
-        : { transactions: [] };
-
-      const milestonesOk = milestonesRes?.ok === true;
-      if (!milestonesOk) {
-        setMilestonesUnavailable(true);
-      }
-      const milestonesData = milestonesOk
-        ? await milestonesRes!.json()
-        : { milestones: [] };
-
-      const items: ActivityItem[] = [];
-
-      // Add transaction activities
-      const transactions = transactionsData.transactions || [];
-      transactions.forEach((tx: any) => {
-        items.push({
-          id: `tx-${tx.id}`,
-          type: "support",
-          title: `Received ${tx.amount} ${tx.assetCode}`,
-          description: `Support from ${truncateHash(tx.senderAddress, 8)}`,
-          timestamp: tx.createdAt,
-          icon: getActivityIcon("support"),
-          metadata: {
-            amount: tx.amount,
-            assetCode: tx.assetCode,
-            supporter: tx.senderAddress,
-            txHash: tx.txHash,
-          },
-        });
-      });
-
-      // Add milestone activities
-      const milestones = milestonesData.milestones || [];
-      milestones.forEach((milestone: any) => {
-        if (milestone.reachedAt) {
-          items.push({
-            id: `milestone-${milestone.id}`,
-            type: "milestone",
-            title: `Milestone reached: ${milestone.title}`,
-            description: `Goal of ${milestone.targetAmount} ${milestone.assetCode} achieved`,
-            timestamp: milestone.reachedAt,
-            icon: getActivityIcon("milestone"),
-            metadata: {
-              milestone: milestone.title,
-              amount: milestone.targetAmount,
-              assetCode: milestone.assetCode,
-            },
-          });
-        }
-      });
-
-      // Sort by timestamp (newest first)
-      items.sort(
-        (a, b) =>
-          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-      );
-
-      setActivities(items);
-      setHasMore(items.length > limit);
-    } catch (err) {
-      console.error("Failed to fetch activities:", err);
-      setError("Failed to load activity feed");
-    } finally {
-      setLoading(false);
+      milestonesData = await milestonesRes!.json();
+    } catch {
+      milestonesUnavailable = true;
     }
   }
 
-  if (loading) {
+  const items: ActivityItem[] = [];
+
+  // Add transaction activities
+  const transactions = transactionsData.transactions || [];
+  transactions.forEach((tx: any) => {
+    items.push({
+      id: `tx-${tx.id}`,
+      type: "support",
+      title: `Received ${tx.amount} ${tx.assetCode}`,
+      description: `Support from ${truncateHash(tx.supporterAddress ?? '', 8)}`,
+      timestamp: tx.createdAt,
+      metadata: {
+        amount: tx.amount,
+        assetCode: tx.assetCode,
+        supporter: tx.supporterAddress,
+        txHash: tx.txHash,
+      },
+    });
+  });
+
+  // Add milestone activities
+  const milestones = milestonesData.milestones || [];
+  milestones.forEach((milestone: any) => {
+    if (milestone.reachedAt) {
+      items.push({
+        id: `milestone-${milestone.id}`,
+        type: "milestone",
+        title: `Milestone reached: ${milestone.title}`,
+        description: `Goal of ${milestone.targetAmount} ${milestone.assetCode} achieved`,
+        timestamp: milestone.reachedAt,
+        metadata: {
+          milestone: milestone.title,
+          amount: milestone.targetAmount,
+          assetCode: milestone.assetCode,
+        },
+      });
+    }
+  });
+
+  // Sort by timestamp (newest first)
+  items.sort(
+    (a, b) =>
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
+
+  return { items, milestonesUnavailable };
+}
+
+export function ActivityFeed({ username, limit = 10 }: ActivityFeedProps) {
+  const [displayedItems, setDisplayedItems] = useState(limit);
+
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ["activity-feed", username],
+    queryFn: ({ signal }) => fetchActivities(username, signal),
+  });
+
+  const activities = data?.items ?? [];
+  const milestonesUnavailable = data?.milestonesUnavailable ?? false;
+
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
         <div className="space-y-4 w-full max-w-md">
@@ -184,7 +174,7 @@ export function ActivityFeed({ username, limit = 10 }: ActivityFeedProps) {
   if (error) {
     return (
       <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-4 text-sm text-red-400">
-        {error}
+        Failed to load activity feed
       </div>
     );
   }
@@ -200,7 +190,7 @@ export function ActivityFeed({ username, limit = 10 }: ActivityFeedProps) {
           <AlertTriangle className="h-4 w-4 flex-shrink-0" />
           <span>Milestone data could not be loaded — the feed may be incomplete.</span>
           <button
-            onClick={fetchActivities}
+            onClick={() => refetch()}
             className="ml-auto flex-shrink-0 text-xs underline underline-offset-2 hover:text-yellow-300 transition"
           >
             Retry
@@ -228,7 +218,7 @@ export function ActivityFeed({ username, limit = 10 }: ActivityFeedProps) {
                 <div className="flex gap-4">
                   {/* Icon */}
                   <div className="flex-shrink-0 flex items-center justify-center h-10 w-10 rounded-full bg-white/5">
-                    {activity.icon}
+                    {getActivityIcon(activity.type)}
                   </div>
 
                   {/* Content */}
@@ -253,15 +243,15 @@ export function ActivityFeed({ username, limit = 10 }: ActivityFeedProps) {
                           </span>
                         )}
                         {activity.metadata.txHash && (
-                          <Link
-                            href={`https://stellar.expert/explorer/testnet/tx/${activity.metadata.txHash}`}
+                          <a
+                            href={stellarExpertUrl('tx', activity.metadata.txHash)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 text-xs text-white/70 hover:text-white/90 transition font-mono"
                           >
                             {truncateHash(activity.metadata.txHash)}
                             <span>↗</span>
-                          </Link>
+                          </a>
                         )}
                       </div>
                     )}

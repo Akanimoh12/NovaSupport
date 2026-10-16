@@ -3,26 +3,47 @@ import { prisma } from "../db.js";
 import { logger } from "../logger.js";
 import { Metrics } from "../metrics.js";
 
-export async function processDueRecurringSupports(prismaClient = prisma) {
-  const now = new Date();
-  
-  const dueSupports = await prismaClient.recurringSupport.findMany({
-    where: {
-      status: "active",
-      nextRunAt: { lte: now },
-    },
-    include: {
-      profile: true,
-      supporter: true,
-    },
-  });
+const DRIP_BATCH_SIZE = 100;
 
-  for (const support of dueSupports) {
+export function addMonths(date: Date, months: number): Date {
+  const result = new Date(date);
+  const targetMonth = result.getMonth() + months;
+  result.setMonth(targetMonth);
+  // setMonth overflows into the next month when the day doesn't exist
+  // there (e.g. Jan 31 + 1 month -> Mar 3). Clamp to the last day of
+  // the target month instead.
+  if (result.getMonth() !== ((targetMonth % 12) + 12) % 12) {
+    result.setDate(0);
+  }
+  return result;
+}
+
+export async function processDueRecurringSupports(prismaClient = prisma, now = new Date()) {
+  let cursor: string | undefined;
+
+  do {
+    const dueSupports = await prismaClient.recurringSupport.findMany({
+      where: {
+        status: "active",
+        nextRunAt: { lte: now },
+      },
+      include: {
+        profile: true,
+        supporter: true,
+      },
+      take: DRIP_BATCH_SIZE,
+      orderBy: { id: "asc" },
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    });
+
+    if (dueSupports.length === 0) break;
+
+    for (const support of dueSupports) {
     // #608: supporterId is NULL when the supporter's account was deleted (SET NULL FK).
     // Mark the subscription cancelled so it stops appearing as due and so
     // the profile owner can see the cancellation in their dashboard.
     if (!support.supporter) {
-      await prisma.recurringSupport.update({
+      await prismaClient.recurringSupport.update({
         where: { id: support.id },
         data: { status: "cancelled", cancelledAt: new Date() },
       });
@@ -32,45 +53,47 @@ export async function processDueRecurringSupports(prismaClient = prisma) {
 
     try {
       const supporter = support.supporter;
-      // Calculate nextRunAt based on frequency
-      const nextRunAt = new Date(now);
-      if (support.frequency === "weekly") {
-        nextRunAt.setDate(nextRunAt.getDate() + 7);
-      } else {
-        // Default to monthly (30 days)
-        nextRunAt.setDate(nextRunAt.getDate() + 30);
+      // Calculate nextRunAt based on frequency, advancing from now if stale
+      let nextRunAt =
+        support.frequency === "weekly"
+          ? new Date(support.nextRunAt.getTime() + 7 * 24 * 60 * 60 * 1000)
+          : addMonths(support.nextRunAt, 1);
+
+      // If nextRunAt is still in the past, keep advancing until it's in the future (#1258)
+      while (nextRunAt <= now) {
+        nextRunAt =
+          support.frequency === "weekly"
+            ? new Date(nextRunAt.getTime() + 7 * 24 * 60 * 60 * 1000)
+            : addMonths(nextRunAt, 1);
       }
 
-      await prismaClient.$transaction(async (tx: any) => {
-        // Create the pending SupportTransaction
-        const txHash = `pending_${crypto.randomUUID()}`;
-
-        await tx.supportTransaction.create({
+      // Atomically create the execution and claim the subscription in a single
+      // transaction so concurrent scheduler instances cannot double-process.
+      await prismaClient.$transaction(async (transaction) => {
+        await transaction.recurringSupportExecution.create({
           data: {
-            txHash,
-            amount: support.amount,
-            assetCode: support.assetCode,
+            recurringSupportId: support.id,
             status: "pending",
-            message: `Recurring support (${support.frequency})`,
-            stellarNetwork: "TESTNET",
-            recipientAddress: support.profile.walletAddress,
-            profileId: support.profileId,
-            supporterId: support.supporterId,
-            supporterAddress: supporter.email,
           },
         });
 
-        // Update the RecurringSupport
-        await tx.recurringSupport.update({
-          where: { id: support.id },
-          data: { nextRunAt },
-        });
+        const claimed = await transaction.$executeRaw`
+          UPDATE "RecurringSupport"
+          SET "nextRunAt" = ${nextRunAt}
+          WHERE id = ${support.id} AND "nextRunAt" <= ${now} AND "status" = 'active'
+        `;
+
+        if (claimed === 0) {
+          throw new Error("Recurring support was already claimed");
+        }
       });
 
       logger.info({
         dripId: support.id,
         profileId: support.profileId,
         amount: support.amount.toString(),
+        assetCode: support.assetCode,
+        assetIssuer: support.assetIssuer,
       }, "Processed due recurring support");
       Metrics.dripsProcessed();
 
@@ -82,24 +105,80 @@ export async function processDueRecurringSupports(prismaClient = prisma) {
       Metrics.dripErrors();
     }
   }
+
+    cursor = dueSupports.length === DRIP_BATCH_SIZE
+      ? dueSupports[dueSupports.length - 1].id
+      : undefined;
+  } while (cursor !== undefined);
 }
 
-export function startDripScheduler() {
+export type SchedulerHandle = {
+  stop(): Promise<void>;
+};
+
+let dripInterval: ReturnType<typeof setInterval> | null = null;
+let dripInFlight: Promise<void> | null = null;
+let dripStopped = true;
+
+function runDripSchedulerTick(): void {
+  dripInFlight = processDueRecurringSupports()
+    .catch((err) => {
+      logger.error({ err }, "Error in processDueRecurringSupports run");
+    })
+    .finally(() => {
+      dripInFlight = null;
+    });
+}
+
+export function startDripScheduler(): SchedulerHandle {
+  // Guard against re-entry: return handle to existing scheduler if already running
+  if (dripInterval !== null && !dripStopped) {
+    logger.warn("Drip scheduler already running, returning existing handle");
+    return {
+      async stop() {
+        if (dripStopped) return;
+        dripStopped = true;
+        if (dripInterval) {
+          clearInterval(dripInterval);
+          dripInterval = null;
+        }
+        if (dripInFlight) {
+          await dripInFlight;
+        }
+        logger.info("Drip scheduler stopped.");
+      },
+    };
+  }
+
   if (process.env.DRIP_SCHEDULER_ENABLED === "true") {
     logger.info("Drip scheduler enabled. Starting...");
+    dripStopped = false;
     
     // Initial run
-    processDueRecurringSupports().catch((err) => {
-      logger.error({ err }, "Error in initial processDueRecurringSupports run");
-    });
+    runDripSchedulerTick();
     
     // Then every 60 seconds
-    setInterval(() => {
-      processDueRecurringSupports().catch((err) => {
-        logger.error({ err }, "Error in processDueRecurringSupports interval");
-      });
+    dripInterval = setInterval(() => {
+      if (!dripInFlight) {
+        runDripSchedulerTick();
+      }
     }, 60000);
   } else {
     logger.info("Drip scheduler disabled.");
   }
+
+  return {
+    async stop() {
+      if (dripStopped) return;
+      dripStopped = true;
+      if (dripInterval) {
+        clearInterval(dripInterval);
+        dripInterval = null;
+      }
+      if (dripInFlight) {
+        await dripInFlight;
+      }
+      logger.info("Drip scheduler stopped.");
+    },
+  };
 }

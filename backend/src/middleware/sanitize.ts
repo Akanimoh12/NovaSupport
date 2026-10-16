@@ -1,6 +1,35 @@
 import type { Request, Response, NextFunction } from "express";
 import sanitizeHtml from "sanitize-html";
+import { BlockList, isIP } from "node:net";
 import { logger } from "../logger.js";
+import { validatePublicUrl } from "../utils/url-validator.js";
+
+const PRIVATE_IP_RANGES = new BlockList();
+PRIVATE_IP_RANGES.addSubnet("0.0.0.0", 8, "ipv4");
+PRIVATE_IP_RANGES.addSubnet("127.0.0.0", 8, "ipv4");
+PRIVATE_IP_RANGES.addSubnet("10.0.0.0", 8, "ipv4");
+PRIVATE_IP_RANGES.addSubnet("172.16.0.0", 12, "ipv4");
+PRIVATE_IP_RANGES.addSubnet("192.168.0.0", 16, "ipv4");
+PRIVATE_IP_RANGES.addSubnet("169.254.0.0", 16, "ipv4");
+PRIVATE_IP_RANGES.addSubnet("::1", 128, "ipv6");
+PRIVATE_IP_RANGES.addSubnet("::", 128, "ipv6");
+PRIVATE_IP_RANGES.addSubnet("fc00::", 7, "ipv6");
+PRIVATE_IP_RANGES.addSubnet("fe80::", 10, "ipv6");
+
+function isPrivateHostname(hostname: string): boolean {
+  if (hostname === "localhost") return true;
+
+  const address = hostname.replace(/^\[|\]$/g, "");
+  const family = isIP(address);
+  if (family === 0) return false;
+
+  if (family === 6) {
+    const mapped = address.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
+    if (mapped) return PRIVATE_IP_RANGES.check(mapped[1], "ipv4");
+  }
+
+  return PRIVATE_IP_RANGES.check(address, family === 4 ? "ipv4" : "ipv6");
+}
 
 const STRIP_ALL_HTML: sanitizeHtml.IOptions = {
   allowedTags: [],
@@ -15,6 +44,10 @@ const SAFE_HTML: sanitizeHtml.IOptions = {
 };
 
 // Free-text user content fields where HTML should be stripped to prevent stored XSS
+// NOTE: Only fields present in Prisma schema / Zod schemas / route handlers.
+// Unused placeholders (social handles beyond twitter/github, contact/notification
+// emails, generic text/content/notes/tags/link keys) were removed to keep the
+// allowlist drift-free (see #1364).
 const HTML_CONTENT_FIELDS = new Set([
   "bio",
   "message",
@@ -22,12 +55,7 @@ const HTML_CONTENT_FIELDS = new Set([
   "displayName",
   "title",
   "name",
-  "text",
-  "content",
-  "notes",
   "username",
-  "tags_item", // For array items in query params
-  "tags", // For direct tags field
 ]);
 
 // URL fields that should be normalized and validated
@@ -36,40 +64,33 @@ const URL_FIELDS = new Set([
   "avatarUrl",
   "webhookUrl",
   "url",
-  "link",
 ]);
 
 // Social handle fields that need special validation
 const SOCIAL_HANDLE_FIELDS = new Set([
   "twitterHandle",
   "githubHandle",
-  "linkedinHandle",
-  "discordHandle",
 ]);
 
 // Email fields that need validation
 const EMAIL_FIELDS = new Set([
   "email",
-  "contactEmail",
-  "notificationEmail",
 ]);
 
 // Fields that should be converted to lowercase
 const LOWERCASE_FIELDS = new Set([
   "username",
   "email",
-  "contactEmail",
-  "notificationEmail",
 ]);
 
 // Maximum lengths for different field types
 const MAX_LENGTHS = {
-  bio: 500,
+  bio: 280,
   message: 280,
   description: 1000,
-  displayName: 100,
+  displayName: 64,
   title: 200,
-  username: 50,
+  username: 32,
   twitterHandle: 15,
   githubHandle: 39,
   url: 2048,
@@ -97,7 +118,17 @@ function normalizeUrl(value: string): { url: string | null; violations: string[]
   try {
     // Add protocol if missing, but validate the original format first
     let urlString = value;
-    
+
+    // Block non-http(s) schemes that may not contain "://" (e.g. javascript:, data:)
+    const colonIdx = value.indexOf(":");
+    if (colonIdx !== -1) {
+      const scheme = value.slice(0, colonIdx).toLowerCase().trim();
+      if (scheme !== "http" && scheme !== "https" && !/^\s*$/.test(scheme)) {
+        violations.push("Only HTTP and HTTPS protocols are allowed");
+        return { url: null, violations };
+      }
+    }
+
     // Check for invalid protocols in the original string
     if (value.includes("://")) {
       const protocol = value.split("://")[0].toLowerCase();
@@ -105,7 +136,7 @@ function normalizeUrl(value: string): { url: string | null; violations: string[]
         violations.push("Only HTTP and HTTPS protocols are allowed");
         return { url: null, violations };
       }
-    } else {
+    } else if (colonIdx === -1) {
       // Add https if no protocol
       urlString = `https://${urlString}`;
     }
@@ -120,13 +151,7 @@ function normalizeUrl(value: string): { url: string | null; violations: string[]
 
     // Block localhost and private IPs for security
     const hostname = url.hostname.toLowerCase();
-    if (
-      hostname === "localhost" ||
-      hostname.startsWith("127.") ||
-      hostname.startsWith("192.168.") ||
-      hostname.startsWith("10.") ||
-      hostname.match(/^172\.(1[6-9]|2[0-9]|3[01])\./)
-    ) {
+    if (isPrivateHostname(hostname)) {
       violations.push("Private/local URLs are not allowed");
       return { url: null, violations };
     }
@@ -138,10 +163,8 @@ function normalizeUrl(value: string): { url: string | null; violations: string[]
       return { url: null, violations };
     }
 
-    // url.href adds a trailing slash to bare origins (e.g. "https://stellar.example/").
-    // Strip it only when the original had no path and no trailing slash.
-    const href = url.pathname === "/" && !value.endsWith("/") ? url.href.slice(0, -1) : url.href;
-    return { url: href, violations };
+    // Always return the canonical href (with trailing slash for bare origins).
+    return { url: url.href, violations };
   } catch (error) {
     violations.push("Invalid URL format");
     return { url: null, violations };
@@ -295,7 +318,7 @@ export function sanitizeString(
     }
 
     // Check for control characters (except newlines and tabs for some fields)
-    const allowNewlines = ["bio", "message", "description", "content"].includes(key);
+    const allowNewlines = ["bio", "message", "description"].includes(key);
     const controlCharRegex = allowNewlines ? /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g : /[\x00-\x08\x0B-\x1F\x7F]/g;
     if (controlCharRegex.test(result)) {
       violations.push("Control characters removed");
@@ -320,6 +343,7 @@ export function sanitizeString(
 export function sanitizeObject(
   obj: unknown,
   depth = 0,
+  parentKey?: string,
 ): { result: unknown; changed: boolean; violations: string[] } {
   const allViolations: string[] = [];
 
@@ -328,9 +352,27 @@ export function sanitizeObject(
   }
 
   if (Array.isArray(obj)) {
+    // Use the parent field's rules when it is a known field; otherwise fall
+    // back to "message" so unknown array fields still get HTML stripping
+    // instead of silently bypassing XSS protection.
+    const isKnownField =
+      parentKey !== undefined &&
+      (HTML_CONTENT_FIELDS.has(parentKey) ||
+        URL_FIELDS.has(parentKey) ||
+        SOCIAL_HANDLE_FIELDS.has(parentKey) ||
+        EMAIL_FIELDS.has(parentKey) ||
+        LOWERCASE_FIELDS.has(parentKey) ||
+        (MAX_LENGTHS as Record<string, unknown>)[parentKey] !== undefined);
+    const itemKey = isKnownField ? (parentKey as string) : "message";
     let changed = false;
     const result = obj.map((item, index) => {
-      const { result: r, changed: c, violations } = sanitizeObject(item, depth + 1);
+      if (typeof item === "string") {
+        const { result: r, changed: c, violations } = sanitizeString(itemKey, item);
+        if (c) changed = true;
+        allViolations.push(...violations.map(v => `[${index}] ${v}`));
+        return r;
+      }
+      const { result: r, changed: c, violations } = sanitizeObject(item, depth + 1, parentKey);
       if (c) changed = true;
       allViolations.push(...violations.map(v => `[${index}] ${v}`));
       return r;
@@ -348,7 +390,7 @@ export function sanitizeObject(
         allViolations.push(...violations.map(v => `${key}: ${v}`));
         result[key] = r;
       } else {
-        const { result: r, changed: c, violations } = sanitizeObject(value, depth + 1);
+        const { result: r, changed: c, violations } = sanitizeObject(value, depth + 1, key);
         if (c) changed = true;
         allViolations.push(...violations.map(v => `${key}.${v}`));
         result[key] = r;
@@ -360,11 +402,11 @@ export function sanitizeObject(
   return { result: obj, changed: false, violations: allViolations };
 }
 
-export function sanitizeBody(
+export async function sanitizeBody(
   req: Request,
   _res: Response,
   next: NextFunction,
-): void {
+): Promise<void> {
   if (req.body && typeof req.body === "object") {
     const { result, changed, violations } = sanitizeObject(
       req.body as Record<string, unknown>,
@@ -382,6 +424,32 @@ export function sanitizeBody(
       );
       req.body = result;
     }
+
+    const urlChecks: Array<{ parent: Record<string, unknown>; key: string; value: string }> = [];
+    const collectUrls = (value: unknown): void => {
+      if (!value || typeof value !== "object") return;
+      if (Array.isArray(value)) {
+        value.forEach(collectUrls);
+        return;
+      }
+      for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+        if (typeof child === "string" && URL_FIELDS.has(key)) {
+          urlChecks.push({ parent: value as Record<string, unknown>, key, value: child });
+        } else {
+          collectUrls(child);
+        }
+      }
+    };
+    collectUrls(result);
+    for (const check of urlChecks) {
+      const violation = await validatePublicUrl(check.value);
+      if (violation) {
+        check.parent[check.key] = "";
+        violations.push(`${check.key}: ${violation}`);
+      }
+    }
+
+    req.body = result;
 
     // Log security violations separately for monitoring
     if (violations.length > 0) {

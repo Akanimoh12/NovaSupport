@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { SHARE_DONE_KEY_PREFIX } from "@/components/onboarding-checklist";
 
 type ShareButtonProps = {
   displayName: string;
@@ -10,7 +11,16 @@ type ShareButtonProps = {
 export function ShareButton({ displayName, username }: ShareButtonProps) {
   const [copied, setCopied] = useState(false);
 
-  const profileUrl = `https://novasupport.xyz/profile/${username}`;
+  const profileUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/profile/${username}`
+      : `/profile/${username}`;
+
+  function markShared() {
+    if (typeof window !== "undefined") {
+      localStorage.setItem(`${SHARE_DONE_KEY_PREFIX}${username}`, "true");
+    }
+  }
 
   const handleShare = async () => {
     if (typeof navigator !== "undefined" && navigator.share) {
@@ -20,6 +30,7 @@ export function ShareButton({ displayName, username }: ShareButtonProps) {
           text: `Support ${displayName} on Stellar`,
           url: profileUrl,
         });
+        markShared();
       } catch (err) {
         // User dismissed the share sheet — ignore AbortError silently
         if (err instanceof Error && err.name !== "AbortError") {
@@ -45,6 +56,7 @@ export function ShareButton({ displayName, username }: ShareButtonProps) {
       document.execCommand("copy");
       document.body.removeChild(textarea);
     }
+    markShared();
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -53,6 +65,7 @@ export function ShareButton({ displayName, username }: ShareButtonProps) {
     <button
       type="button"
       onClick={handleShare}
+      aria-label={copied ? "Profile link copied" : `Share ${displayName}'s profile`}
       className="inline-flex min-h-[36px] items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-medium text-white hover:bg-white/10 transition-colors"
     >
       {copied ? (

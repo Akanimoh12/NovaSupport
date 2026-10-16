@@ -16,7 +16,7 @@
 // walletAddress. This keeps the indexer eventually consistent with the
 // profile registry without blocking the hot path.
 
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient, Prisma } from "@prisma/client";
 import { logger } from "../logger.js";
 import { Metrics } from "../metrics.js";
 
@@ -94,6 +94,9 @@ export class EventIndexer {
   private readonly maxPagesPerTick: number;
   private stopped = false;
   private timer: NodeJS.Timeout | null = null;
+  private currentTick: Promise<void> | null = null;
+  /** Pages consumed since the last time the drain loop paused. Reset once the burst ends. */
+  private pagesConsumedInBurst = 0;
 
   constructor(options: EventIndexerOptions) {
     this.prisma = options.prisma;
@@ -110,11 +113,14 @@ export class EventIndexer {
     this.scheduleNextTick(0);
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     this.stopped = true;
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
+    }
+    if (this.currentTick) {
+      await this.currentTick;
     }
   }
 
@@ -191,8 +197,18 @@ export class EventIndexer {
             message: event.message,
             profileId,
             status: "SUCCESS",
+            // Use the on-chain event timestamp so that backfilled transactions
+            // are stamped with when they actually occurred, not when the indexer
+            // ingested them. Without this, historical backfills corrupt
+            // date-range queries, the weekly digest, and tax-year CSV exports.
+            createdAt: event.emittedAt,
           },
         });
+        // Heuristic: assume createdAt == updatedAt means this was an INSERT.
+        // On fast systems (ms-resolution timestamps), a duplicate event can land
+        // in the same millisecond as the insert, miscounting as an update.
+        // TODO: Use Postgres INSERT ... ON CONFLICT DO UPDATE RETURNING xmax,
+        // where xmax = 0 means INSERT and non-zero means UPDATE, for exact detection.
         if (result.createdAt.getTime() === result.updatedAt.getTime()) {
           ingested += 1;
         }
@@ -215,7 +231,13 @@ export class EventIndexer {
     const orphans = await this.prisma.supportTransaction.findMany({
       where: { profileId: "__orphan__" },
       select: { id: true, recipientAddress: true },
+      take: 100,
     });
+
+    const trueBacklog = await this.prisma.supportTransaction.count({
+      where: { profileId: "__orphan__" },
+    });
+    Metrics.orphanCount(trueBacklog);
 
     if (orphans.length === 0) return 0;
 
@@ -231,22 +253,18 @@ export class EventIndexer {
     );
 
     let resolved = 0;
-    for (const orphan of orphans) {
-      const profileId = addressToProfileId.get(orphan.recipientAddress);
-      if (!profileId) continue;
-
-      await this.prisma.supportTransaction.update({
-        where: { id: orphan.id },
+    for (const [address, profileId] of addressToProfileId) {
+      const count = await this.prisma.supportTransaction.updateMany({
+        where: { profileId: "__orphan__", recipientAddress: address },
         data: { profileId },
       });
-      resolved += 1;
+      resolved += count.count;
     }
 
     if (resolved > 0) {
       logger.info({ resolved }, "resolved orphaned transactions to profiles");
     }
 
-    Metrics.orphanCount(orphans.length - resolved);
     return resolved;
   }
 
@@ -281,7 +299,7 @@ export class EventIndexer {
   }
 
   private async writeCursorWithinTx(
-    tx: any,
+    tx: Prisma.TransactionClient,
     token: string,
     ledger: number,
   ): Promise<void> {
@@ -305,9 +323,14 @@ export class EventIndexer {
   private scheduleNextTick(delayMs: number): void {
     if (this.stopped) return;
     this.timer = setTimeout(() => {
-      this.tick().catch((err) => {
-        logger.error({ err }, "event indexer tick failed");
-      });
+      this.timer = null;
+      this.currentTick = this.tick()
+        .catch((err) => {
+          logger.error({ err }, "event indexer tick failed");
+        })
+        .finally(() => {
+          this.currentTick = null;
+        });
     }, delayMs);
   }
 
@@ -316,9 +339,13 @@ export class EventIndexer {
     // Process exactly one page per tick so the event loop is never blocked by a
     // massive backfill. When more pages are available we reschedule with a 0 ms
     // delay (fast drain) rather than holding all pages in memory simultaneously.
+    // `maxPagesPerTick` caps how many pages we drain back-to-back before
+    // yielding for a full `pollIntervalMs`, so a huge backlog can't starve the
+    // rest of the process.
     let delay = this.pollIntervalMs;
     try {
       const { ingested, nextCursor } = await this.pollOnce();
+      this.pagesConsumedInBurst += 1;
       if (ingested > 0) {
         Metrics.eventsIngested(ingested);
         Metrics.eventIndexerLastSuccess(Date.now());
@@ -326,8 +353,20 @@ export class EventIndexer {
           { ingested, contractId: this.contractId },
           "indexed events",
         );
-        // More pages available — re-enter immediately but yield to the event loop.
-        if (nextCursor !== null) delay = 0;
+      }
+      // More pages available — re-enter immediately but yield to the event loop,
+      // unless we've hit the per-tick page cap; in that case defer the rest of
+      // the backlog to a future tick.
+      if (nextCursor !== null && this.pagesConsumedInBurst < this.maxPagesPerTick) {
+        delay = 0;
+      } else {
+        if (nextCursor !== null) {
+          logger.info(
+            { maxPagesPerTick: this.maxPagesPerTick, contractId: this.contractId },
+            "event indexer hit maxPagesPerTick; deferring remaining backlog",
+          );
+        }
+        this.pagesConsumedInBurst = 0;
       }
 
       await this.resolveOrphans().catch((err) => {

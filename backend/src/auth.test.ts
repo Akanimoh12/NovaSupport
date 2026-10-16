@@ -298,7 +298,7 @@ async function main() {
     const res = mockResponse();
     const next = mockNext();
 
-    requireAuth(req, res, next);
+    await requireAuth(req, res, next);
 
     assert.ok(next.called, "next() should be called for valid token");
     assert.ok(req.auth !== undefined, "req.auth should be set");
@@ -310,7 +310,7 @@ async function main() {
     const res = mockResponse();
     const next = mockNext();
 
-    requireAuth(req, res, next);
+    await requireAuth(req, res, next);
 
     assert.equal(next.called, false, "next() should not be called");
     assert.equal(res.statusCode, 401, "Should return 401 status");
@@ -327,7 +327,7 @@ async function main() {
     const res = mockResponse();
     const next = mockNext();
 
-    requireAuth(req, res, next);
+    await requireAuth(req, res, next);
 
     assert.equal(next.called, false, "next() should not be called");
     assert.equal(res.statusCode, 401, "Should return 401 status");
@@ -340,7 +340,7 @@ async function main() {
     const res = mockResponse();
     const next = mockNext();
 
-    requireAuth(req, res, next);
+    await requireAuth(req, res, next);
 
     assert.equal(next.called, false, "next() should not be called");
     assert.equal(res.statusCode, 401, "Should return 401 status");
@@ -357,7 +357,7 @@ async function main() {
     const res = mockResponse();
     const next = mockNext();
 
-    requireAuth(req, res, next);
+    await requireAuth(req, res, next);
 
     assert.equal(next.called, false, "next() should not be called");
     assert.equal(res.statusCode, 401, "Should return 401 status");
@@ -493,7 +493,7 @@ async function main() {
     });
     const res1 = mockResponse();
     const next1 = mockNext();
-    requireAuth(req1, res1, next1);
+    await requireAuth(req1, res1, next1);
 
     // Test optionalAuth with same token
     const req2 = mockRequest({

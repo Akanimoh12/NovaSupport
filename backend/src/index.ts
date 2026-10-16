@@ -1,3 +1,5 @@
+// tracing.ts must be the very first import so OTel patches all subsequent modules
+import "./tracing.js";
 import "dotenv/config";
 import * as Sentry from "@sentry/node";
 import { logger } from "./logger.js";
@@ -84,6 +86,10 @@ if (!startupConfig.supabase.enabled) {
   );
 }
 
+if (!process.env.ADMIN_WALLET_ADDRESS) {
+  logger.warn("ADMIN_WALLET_ADDRESS is not set — admin endpoints are disabled");
+}
+
 if (startupConfig.horizonUrl.includes("testnet")) {
   logger.warn(
     { horizonUrl: startupConfig.horizonUrl },
@@ -102,11 +108,27 @@ import { startDripScheduler } from "./services/drip-scheduler.js";
 import { startWebhookProcessor } from "./services/webhook-processor.js";
 import { EventIndexer } from "./services/event-indexer.js";
 import { createSorobanRpcClient } from "./services/soroban-rpc-client.js";
-import { startWeeklyDigestScheduler } from "./services/weekly-digest.js";
+import { startWeeklyDigestScheduler, stopWeeklyDigestScheduler } from "./services/weekly-digest.js";
+import {
+  startIpRetentionPurgeScheduler,
+  stopIpRetentionPurgeScheduler,
+  startRevokedTokenPurgeScheduler,
+  stopRevokedTokenPurgeScheduler,
+} from "./services/ip-retention-purge.js";
+import {
+  startBadgeSweepScheduler,
+  stopBadgeSweepScheduler,
+} from "./services/badge-awarder.js";
 import { prisma } from "./db.js";
+import { connectRedis, disconnectRedis } from "./services/redis.js";
+import { resolveStellarNetwork } from "./network.js";
 
 const port = Number(process.env.PORT ?? 4000);
-const indexerNetwork = process.env.INDEXER_NETWORK ?? "TESTNET";
+// Derive the indexer's network from the same source of truth used by the rest
+// of the backend (API responses, email links) instead of a separate variable,
+// so switching the active network can't leave the indexer tagging rows with the
+// wrong network label (#1353).
+const indexerNetwork = resolveStellarNetwork();
 const contractId =
   process.env.SOROBAN_CONTRACT_ID ??
   process.env.CONTRACT_ID ??
@@ -117,9 +139,13 @@ const sorobanRpcUrl =
 const indexerStartLedger = process.env.INDEXER_START_LEDGER
   ? Number(process.env.INDEXER_START_LEDGER)
   : undefined;
-const indexerMaxPagesPerTick = process.env.INDEXER_MAX_PAGES_PER_TICK
+const rawMaxPages = process.env.INDEXER_MAX_PAGES_PER_TICK
   ? Number(process.env.INDEXER_MAX_PAGES_PER_TICK)
   : undefined;
+const indexerMaxPagesPerTick =
+  rawMaxPages !== undefined && Number.isFinite(rawMaxPages)
+    ? rawMaxPages
+    : undefined;
 
 const eventIndexer =
   contractId.trim().length > 0
@@ -133,17 +159,33 @@ const eventIndexer =
       })
     : null;
 
-app.listen(port, () => {
+let dripScheduler: ReturnType<typeof startDripScheduler> | null = null;
+let webhookProcessor: ReturnType<typeof startWebhookProcessor> | null = null;
+let shuttingDown = false;
+
+await connectRedis();
+
+const server = app.listen(port, () => {
   logger.info({ port }, `NovaSupport backend listening on http://localhost:${port}`);
 
   // Start the recurring drip scheduler if enabled
-  startDripScheduler();
+  dripScheduler = startDripScheduler();
 
   // Start the weekly digest email scheduler
   startWeeklyDigestScheduler();
 
+  // Start the reporter IP retention purge scheduler
+  startIpRetentionPurgeScheduler();
+
+  // Start the revoked token purge scheduler
+  startRevokedTokenPurgeScheduler();
+
+  // Start the badge sweep safety net (re-awards badges missed by the reactive
+  // post-transaction check)
+  startBadgeSweepScheduler();
+
   // Start the webhook delivery processor
-  startWebhookProcessor();
+  webhookProcessor = startWebhookProcessor();
 
   if (eventIndexer) {
     eventIndexer.start();
@@ -156,4 +198,47 @@ app.listen(port, () => {
       "Soroban event indexer disabled - set SOROBAN_CONTRACT_ID to enable it",
     );
   }
+});
+
+async function shutdown(signal: NodeJS.Signals): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
+  logger.info({ signal }, "Shutdown signal received");
+
+  try {
+    await Promise.all([
+      dripScheduler?.stop(),
+      webhookProcessor?.stop(),
+      eventIndexer?.stop(),
+      Promise.resolve().then(() => stopWeeklyDigestScheduler()),
+      Promise.resolve().then(() => stopIpRetentionPurgeScheduler()),
+      Promise.resolve().then(() => stopRevokedTokenPurgeScheduler()),
+      Promise.resolve().then(() => stopBadgeSweepScheduler()),
+    ]);
+
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    await prisma.$disconnect();
+    await disconnectRedis();
+    await Sentry.close(2_000);
+    logger.info({ signal }, "Graceful shutdown complete");
+    process.exit(signal === "SIGINT" ? 130 : 143);
+  } catch (err) {
+    logger.error({ err, signal }, "Graceful shutdown failed");
+    process.exit(1);
+  }
+}
+
+process.once("SIGTERM", () => {
+  void shutdown("SIGTERM");
+});
+
+process.once("SIGINT", () => {
+  void shutdown("SIGINT");
 });

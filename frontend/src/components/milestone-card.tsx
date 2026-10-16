@@ -81,7 +81,9 @@ function ConfettiBurst() {
 export function MilestoneCard({ milestone, index = 0 }: MilestoneCardProps) {
   const current = parseFloat(milestone.currentAmount);
   const target = parseFloat(milestone.targetAmount);
-  const progress = Math.min((current / target) * 100, 100);
+  const progress = Number.isFinite(current) && Number.isFinite(target) && target > 0
+    ? Math.min((current / target) * 100, 100)
+    : 0;
   const isReached = milestone.status === "reached" || progress >= 100;
 
   return (
@@ -168,7 +170,7 @@ export function MilestoneCard({ milestone, index = 0 }: MilestoneCardProps) {
             "font-medium tabular-nums",
             isReached ? "text-mint" : "text-steel"
           )}>
-            {current.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / {target.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
+            {current.toLocaleString(undefined, { maximumFractionDigits: 7 })} / {target.toLocaleString(undefined, { maximumFractionDigits: 7 })}{" "}
             <span className={cn(
               "font-semibold",
               isReached ? "text-mint" : "text-sky/60"

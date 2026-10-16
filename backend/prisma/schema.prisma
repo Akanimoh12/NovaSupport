@@ -19,51 +19,46 @@ model User {
 }
 
 model Profile {
-  id                  String               @id @default(cuid())
-  username            String               @unique
-  displayName         String
-  bio                 String
-  avatarUrl           String?
-  email                     String?              @unique
-  emailVerified             Boolean              @default(false)
-  emailVerificationToken    String?              @unique
+  id                        String                   @id @default(cuid())
+  username                  String                   @unique
+  displayName               String
+  bio                       String
+  avatarUrl                 String?
+  email                     String?                  @unique
+  emailVerified             Boolean                  @default(false)
+  emailVerificationToken    String?                  @unique
   emailVerificationExpiry   DateTime?
-  notifyOnSupport           Boolean              @default(true)
   websiteUrl                String?
-  twitterHandle       String?
-  githubHandle        String?
-  walletAddress       String
-  ownerId             String
-  viewCount           Int                  @default(0)
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
-  owner               User                 @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  acceptedAssets      AcceptedAsset[]
-  supportTransactions SupportTransaction[]
-  badges              ProfileBadge[]
-  recurringSupports   RecurringSupport[]
-  milestones          Milestone[]
-  webhooks            Webhook[]
-  notificationPreferences NotificationPreferences?
+  twitterHandle             String?
+  githubHandle              String?
+  walletAddress             String                   @unique
+  ownerId                   String
+  viewCount                 Int                      @default(0)
+  createdAt                 DateTime                 @default(now())
+  updatedAt                 DateTime                 @updatedAt
+  owner                     User                     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  acceptedAssets            AcceptedAsset[]
+  supportTransactions       SupportTransaction[]
+  badges                    ProfileBadge[]
+  recurringSupports         RecurringSupport[]
+  milestones                Milestone[]
+  webhooks                  Webhook[]
+  notificationPreferences   NotificationPreferences?
+  reports                   ProfileReport[]
 
   @@index([createdAt(sort: Desc)])
   @@index([ownerId])
-  // Note: pg_trgm GIN indexes for fuzzy search are created at runtime
-  // via `CREATE EXTENSION IF NOT EXISTS pg_trgm` in the search endpoint.
-  // For production, add a migration:
-  //   CREATE INDEX idx_profile_username_trgm ON "Profile" USING GIN ("username" gin_trgm_ops);
-  //   CREATE INDEX idx_profile_displayname_trgm ON "Profile" USING GIN ("displayName" gin_trgm_ops);
 }
 
 model NotificationPreferences {
-  id                 String   @id @default(cuid())
-  profileId          String   @unique
-  notifyOnSupport    Boolean  @default(true)
-  notifyOnMilestone  Boolean  @default(true)
-  weeklyDigest       Boolean  @default(false)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-  profile            Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  id                String   @id @default(cuid())
+  profileId         String   @unique
+  notifyOnSupport   Boolean  @default(true)
+  notifyOnMilestone Boolean  @default(true)
+  weeklyDigest      Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  profile           Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
 }
 
 model AcceptedAsset {
@@ -75,26 +70,30 @@ model AcceptedAsset {
   profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@index([profileId])
+  // Fix #704: prevent duplicate (profileId, code, issuer) rows created by concurrent PATCH requests
+  @@unique([profileId, code, issuer])
 }
 
 model SupportTransaction {
-  id               String    @id @default(cuid())
-  txHash           String    @unique
-  amount           Decimal   @db.Decimal(18, 7)
-  assetCode        String
-  assetIssuer      String?
-  status           String
-  message          String?
-  memo             String?
-  stellarNetwork   String
-  supporterAddress String?
-  recipientAddress String
-  profileId        String
-  supporterId      String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-  profile          Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
-  supporter        User?     @relation("SupporterTransactions", fields: [supporterId], references: [id], onDelete: SetNull)
+  id                          String                     @id @default(cuid())
+  txHash                      String                     @unique
+  amount                      Decimal                    @db.Decimal(18, 7)
+  assetCode                   String
+  assetIssuer                 String?
+  status                      String
+  message                     String?
+  memo                        String?
+  stellarNetwork              String
+  supporterAddress            String?
+  recipientAddress            String
+  profileId                   String
+  supporterId                 String?
+  createdAt                   DateTime                   @default(now())
+  updatedAt                   DateTime                   @updatedAt
+  profile                     Profile                    @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  supporter                   User?                      @relation("SupporterTransactions", fields: [supporterId], references: [id], onDelete: SetNull)
+  recurringSupportExecutionId String?                    @unique
+  recurringSupportExecution   RecurringSupportExecution? @relation(fields: [recurringSupportExecutionId], references: [id], onDelete: SetNull)
 
   @@index([profileId])
   @@index([supporterId])
@@ -111,13 +110,16 @@ model Milestone {
   targetAmount  Decimal   @db.Decimal(18, 7)
   currentAmount Decimal   @db.Decimal(18, 7) @default(0)
   assetCode     String    @default("XLM")
+  assetIssuer   String?
   status        String    @default("active")
+  reachedAt     DateTime?
   profileId     String
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   profile       Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@index([profileId])
+  @@index([profileId, status, reachedAt(sort: Desc)])
 }
 
 model Badge {
@@ -143,57 +145,59 @@ model ProfileBadge {
 }
 
 model Webhook {
-  id        String   @id @default(cuid())
-  url       String
-  secret    String
-  active    Boolean  @default(true)
-  profileId String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  id         String            @id @default(cuid())
+  url        String
+  // secretHash stores a SHA-256 hash of the raw secret — never the plaintext.
+  // It is kept for audit / future inbound-verification use only.
+  secretHash String
+  // signingKey holds the raw secret used to HMAC-sign outbound deliveries.
+  // It is shown to the creator exactly once (at creation time) and never
+  // re-exposed through any API response.
+  signingKey String
+  active     Boolean           @default(true)
+  profileId  String
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+  profile    Profile           @relation(fields: [profileId], references: [id], onDelete: Cascade)
   deliveries WebhookDelivery[]
 
   @@index([profileId])
 }
 
 model WebhookDelivery {
-  id           String   @id @default(cuid())
+  id           String    @id @default(cuid())
   webhookId    String
   eventType    String
   payload      Json
-  status       String   @default("pending") // "pending", "success", "failed"
-  attemptCount Int      @default(0)
+  status       String    @default("pending")
+  attemptCount Int       @default(0)
   nextRetryAt  DateTime? @default(now())
   lastError    String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  webhook      Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  webhook      Webhook   @relation(fields: [webhookId], references: [id], onDelete: Cascade)
 
   @@index([webhookId])
   @@index([status, nextRetryAt])
-  // #609: A partial index covering only status = 'pending' rows is created via
-  // a raw migration (20260623010000) because Prisma's DSL does not support
-  // partial indexes. That index keeps the webhook processor query fast as
-  // completed/failed history accumulates.
 }
 
 model RecurringSupport {
-  id          String    @id @default(cuid())
-  supporterId String?
-  profileId   String
-  amount      Decimal   @db.Decimal(18, 7)
-  assetCode   String    @default("XLM")
-  frequency   String
-  nextRunAt   DateTime  @default(now())
-  status      String    @default("active")
-  cancelledAt DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  // #608: onDelete: SetNull preserves subscription history when the supporter's
-  // User row is deleted. supporterId becomes NULL; the drip-scheduler detects
-  // this on its next run and writes status = 'cancelled' + cancelledAt.
-  supporter   User?     @relation("RecurringSupporters", fields: [supporterId], references: [id], onDelete: SetNull)
-  profile     Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  id               String                      @id @default(cuid())
+  supporterId      String?
+  profileId        String
+  amount           Decimal                     @db.Decimal(18, 7)
+  assetCode        String                      @default("XLM")
+  assetIssuer      String?
+  frequency        String
+  nextRunAt        DateTime                    @default(now())
+  status           String                      @default("active")
+  cancelledAt      DateTime?
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
+  supporterAddress String?
+  supporter        User?                       @relation("RecurringSupporters", fields: [supporterId], references: [id], onDelete: SetNull)
+  profile          Profile                     @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  executions       RecurringSupportExecution[]
 
   @@index([supporterId])
   @@index([profileId])
@@ -201,11 +205,19 @@ model RecurringSupport {
   @@index([nextRunAt, status])
 }
 
-// #281: cursor record for the contract event indexer.
-// One row per (network, contractId) pair. The indexer reads the cursor on
-// start, fetches events strictly after `lastPagingToken`, and updates the
-// row inside the same transaction that persists the new SupportTransaction
-// rows so reprocessing never produces duplicates.
+model RecurringSupportExecution {
+  id                 String              @id @default(cuid())
+  recurringSupportId String
+  status             String              @default("pending")
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  recurringSupport   RecurringSupport    @relation(fields: [recurringSupportId], references: [id], onDelete: Cascade)
+  supportTransaction SupportTransaction?
+
+  @@index([recurringSupportId])
+  @@index([status])
+}
+
 model IndexerCursor {
   id              String   @id @default(cuid())
   network         String
@@ -219,13 +231,58 @@ model IndexerCursor {
   @@map("indexer_cursors")
 }
 
-// #592: Persists the last-run timestamp for recurring server-side jobs so
-// that restarts and rolling deploys do not immediately re-fire the job.
-// One row per job name; upserted on every successful run.
 model SchedulerJob {
   name      String   @id
   lastRunAt DateTime
   updatedAt DateTime @updatedAt
 
   @@map("scheduler_jobs")
+}
+
+model AuthChallenge {
+  id            String   @id @default(cuid())
+  walletAddress String   @unique
+  challenge     String
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([expiresAt])
+  @@map("auth_challenges")
+}
+
+model RevokedToken {
+  jti       String   @id
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@map("revoked_tokens")
+}
+
+model CircuitBreakerState {
+  name          String    @id
+  state         String
+  failureCount  Int       @default(0)
+  nextAttemptAt DateTime?
+  updatedAt     DateTime  @updatedAt
+  createdAt     DateTime  @default(now())
+
+  @@map("circuit_breaker_states")
+}
+
+model ProfileReport {
+  id         String   @id @default(cuid())
+  profileId  String
+  reason     String
+  details    String?
+  reporterIp String?
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime
+  profile    Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
+  @@index([profileId, createdAt(sort: Desc)])
+  @@index([expiresAt])
+  @@map("profile_reports")
 }

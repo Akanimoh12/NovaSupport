@@ -3,6 +3,8 @@
  * Provides a consistent interface across Freighter, Albedo, and Lobstr.
  */
 
+import { Networks } from "@stellar/stellar-sdk";
+
 export type WalletId = "freighter" | "albedo" | "lobstr";
 
 export type WalletErrorCode =
@@ -113,7 +115,11 @@ const albedoAdapter: WalletAdapter = {
   async signTransaction(xdr, { networkPassphrase }) {
     const albedo = (window as any).albedo;
     if (!albedo) throw new WalletError("Albedo extension not found.", "NOT_FOUND");
-    const result = await albedo.tx({ xdr, network: networkPassphrase });
+    // Albedo's tx() expects the shorthand "public" | "testnet", not the full
+    // network passphrase. Passing the passphrase makes every sign fail (#707).
+    const network =
+      networkPassphrase === Networks.PUBLIC ? "public" : "testnet";
+    const result = await albedo.tx({ xdr, network });
     if (!result?.signed_envelope_xdr)
       throw new WalletError("Albedo did not return a signed transaction.", "SIGNING_FAILED");
     return result.signed_envelope_xdr;
@@ -137,10 +143,10 @@ const lobstrAdapter: WalletAdapter = {
     if (!result) throw new WalletError("Lobstr did not return a public key.", "CONNECTION_DENIED");
     return result;
   },
-  async signTransaction(xdr, _options) {
+  async signTransaction(xdr, { networkPassphrase }) {
     const lobstr = (window as any).lobstr;
     if (!lobstr) throw new WalletError("Lobstr extension not found.", "NOT_FOUND");
-    const result = await lobstr.signTransaction(xdr);
+    const result = await lobstr.signTransaction(xdr, { networkPassphrase });
     if (!result?.signedTxXdr)
       throw new WalletError("Lobstr did not return a signed transaction.", "SIGNING_FAILED");
     return result.signedTxXdr;
@@ -161,4 +167,11 @@ export function getAvailableWallets(): WalletAdapter[] {
 
 export function getWalletAdapter(id: WalletId): WalletAdapter | undefined {
   return ALL_ADAPTERS.find((a) => a.id === id);
+}
+
+export function getStoredWalletAddress(): string | null {
+  if (typeof window === "undefined" || typeof localStorage === "undefined") {
+    return null;
+  }
+  return localStorage.getItem("walletAddress");
 }

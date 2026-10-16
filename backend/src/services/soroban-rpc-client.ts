@@ -101,7 +101,12 @@ function decodeSupportEvent(event: RpcEvent): SupportEventRecord | null {
     pagingToken: event.pagingToken ?? event.id,
     amount: String(nativeObj.amount ?? "0"),
     assetCode: String(nativeObj.asset_code ?? nativeObj.assetCode ?? ""),
-    assetIssuer: null,
+    assetIssuer:
+      nativeObj.asset_issuer != null
+        ? String(nativeObj.asset_issuer)
+        : nativeObj.assetIssuer != null
+          ? String(nativeObj.assetIssuer)
+          : null,
     recipientAddress: asAddress(recipient),
     supporterAddress: asAddress(supporter),
     message: nativeObj.message == null ? null : String(nativeObj.message),
@@ -154,6 +159,7 @@ export function createSorobanRpcClient(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody),
+        signal: AbortSignal.timeout(15_000),
       });
 
       if (!response.ok) {
@@ -186,6 +192,7 @@ async function getLatestLedger(rpcUrl: string): Promise<number> {
       id: randomUUID(),
       method: "getLatestLedger",
     }),
+    signal: AbortSignal.timeout(15_000),
   });
 
   if (!response.ok) {
@@ -193,13 +200,24 @@ async function getLatestLedger(rpcUrl: string): Promise<number> {
   }
 
   const json = (await response.json()) as {
-    result?: { sequence?: number; latestLedger?: number };
-    error?: { message?: string };
+    result?: { sequence?: unknown; latestLedger?: unknown } | null;
+    error?: { message?: string } | null;
   };
 
   if (json.error) {
     throw new Error(`Soroban RPC error: ${json.error.message ?? "unknown error"}`);
   }
 
-  return json.result?.sequence ?? json.result?.latestLedger ?? 0;
+  const ledger = json.result?.sequence ?? json.result?.latestLedger;
+
+  // A malformed response (missing/!number sequence & latestLedger) must fail
+  // loudly. Defaulting to 0 would make an indexer with no stored cursor try to
+  // backfill from genesis — an extremely expensive silent misconfiguration.
+  if (typeof ledger !== "number" || !Number.isFinite(ledger)) {
+    throw new Error(
+      "Soroban RPC getLatestLedger returned a malformed response: missing numeric sequence/latestLedger",
+    );
+  }
+
+  return ledger;
 }

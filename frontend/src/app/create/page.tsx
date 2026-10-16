@@ -7,6 +7,7 @@ import { AppShell } from "@/components/app-shell";
 import { useToast } from "@/lib/use-toast";
 import { Toast } from "@/components/toast";
 import { validateWalletAddress } from "@/lib/stellar";
+import { STELLAR_NETWORK } from "@/lib/config";
 
 interface FormData {
   username: string;
@@ -37,6 +38,15 @@ const CONSTRAINTS = [
   { field: "GitHub", rule: "Optional · max 39 chars · hyphens allowed" },
 ];
 
+// Well-known Stellar mainnet issuers for preset assets offered in onboarding.
+// XLM is native and never has an issuer.
+const KNOWN_ISSUERS: Record<string, string> = {
+  USDC:
+    STELLAR_NETWORK === "PUBLIC"
+      ? "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3THOJ2E37CEGOEZWDSP"
+      : "GBBD47IF6LWK7P7MDMSCR4XFM6KJLGMGR5E2Q3ZXZQ4KQQYT5R3332W",
+};
+
 export default function CreatePage() {
   const router = useRouter();
   const { toast, showToast, dismiss } = useToast();
@@ -47,7 +57,7 @@ export default function CreatePage() {
     displayName: "",
     bio: "",
     walletAddress: "",
-    acceptedAssets: ["XLM", "USDC"],
+    acceptedAssets: ["XLM"],
     twitterHandle: "",
     githubHandle: "",
     websiteUrl: "",
@@ -92,8 +102,8 @@ export default function CreatePage() {
   const rateLimited = rateLimitRemainingMinutes > 0;
   const usernameFieldError =
     fieldErrors.username ??
-    (form.username && !/^[a-zA-Z0-9\-]+$/.test(form.username)
-      ? "Username can only contain alphanumeric characters and hyphens."
+    (form.username && !/^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?$/.test(form.username)
+      ? "Username can only contain alphanumeric characters and hyphens, and must start and end with an alphanumeric character."
       : null);
 
   function set(field: keyof FormData) {
@@ -133,12 +143,12 @@ export default function CreatePage() {
 
   const handleNext = () => {
     if (step === 1) {
-      if (!form.displayName || !form.username) {
+      if (!form.displayName.trim() || !form.username.trim()) {
         setError("Display name and username are required.");
         return;
       }
-      if (!/^[a-zA-Z0-9\-]+$/.test(form.username)) {
-        setError("Username can only contain alphanumeric characters and hyphens.");
+      if (!/^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?$/.test(form.username)) {
+        setError("Username can only contain alphanumeric characters and hyphens, and must start and end with an alphanumeric character.");
         return;
       }
     }
@@ -151,8 +161,13 @@ export default function CreatePage() {
         setError(walletValidation.error || "Please enter a valid Stellar wallet address.");
         return;
       }
-      if (form.acceptedAssets.length === 0) {
+      if (assets.length === 0) {
         setError("Please select at least one accepted asset.");
+        return;
+      }
+      const missingIssuer = assets.find((a) => a.code !== "XLM" && !a.issuer.trim());
+      if (missingIssuer) {
+        setError(`Issuer required for ${missingIssuer.code} — please enter the Stellar issuer address.`);
         return;
       }
     }
@@ -173,6 +188,8 @@ export default function CreatePage() {
   };
 
   async function handleSubmit() {
+    if (loading) return;
+
     setError(null);
     setFieldErrors({ username: null, email: null });
 
@@ -291,10 +308,11 @@ export default function CreatePage() {
               <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="flex flex-col gap-2">
-                    <label className="text-[10px] uppercase tracking-[0.25em] text-steel">
+                    <label htmlFor="display-name" className="text-[10px] uppercase tracking-[0.25em] text-steel">
                       Display Name <span className="text-mint">*</span>
                     </label>
                       <input
+                        id="display-name"
                         type="text"
                         required
                         maxLength={64}
@@ -306,7 +324,7 @@ export default function CreatePage() {
                   </div>
 
                   <div className="flex flex-col gap-2">
-                    <label className="text-[10px] uppercase tracking-[0.25em] text-steel">
+                    <label htmlFor="username" className="text-[10px] uppercase tracking-[0.25em] text-steel">
                       Username <span className="text-mint">*</span>
                     </label>
                     <div className="relative">
@@ -314,6 +332,7 @@ export default function CreatePage() {
                         @
                       </span>
                       <input
+                        id="username"
                         type="text"
                         required
                         maxLength={32}
@@ -338,7 +357,7 @@ export default function CreatePage() {
 
                 <div className="flex flex-col gap-2">
                   <div className="flex justify-between items-center">
-                    <label className="text-[10px] uppercase tracking-[0.25em] text-steel">
+                    <label htmlFor="bio" className="text-[10px] uppercase tracking-[0.25em] text-steel">
                       Bio
                     </label>
                     <span
@@ -350,6 +369,7 @@ export default function CreatePage() {
                     </span>
                   </div>
                   <textarea
+                    id="bio"
                     maxLength={280}
                     rows={4}
                     placeholder="Tell the galaxy about your mission…"
@@ -364,18 +384,19 @@ export default function CreatePage() {
             {step === 2 && (
               <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="flex flex-col gap-2">
-                  <label className="text-[10px] uppercase tracking-[0.25em] text-steel">
+                  <label htmlFor="wallet-address" className="text-[10px] uppercase tracking-[0.25em] text-steel">
                     Stellar Wallet Address <span className="text-mint">*</span>
                   </label>
                   <div className="relative">
                     <input
+                      id="wallet-address"
                       type="text"
                       required
                       placeholder="G…"
                       value={form.walletAddress}
                       onChange={(e) => {
-                        const raw = e.target.value;
-                        const cleaned = raw.length > 56 && !raw.startsWith("G") ? raw.slice(0, 56) : raw;
+                        const raw = e.target.value.trim();
+                        const cleaned = raw.startsWith("G") && raw.length > 56 ? raw.slice(0, 56) : raw;
                         setForm((prev) => ({ ...prev, walletAddress: cleaned }));
                         setError(null);
                       }}
@@ -427,7 +448,14 @@ export default function CreatePage() {
                       <button
                         key={asset}
                         type="button"
+                        aria-pressed={assets.some((a) => a.code === asset)}
                         onClick={() => {
+                          const isSelected = assets.some((a) => a.code === asset);
+                          setAssets(
+                            isSelected
+                              ? assets.filter((a) => a.code !== asset)
+                              : [...assets, { code: asset, issuer: KNOWN_ISSUERS[asset] ?? "" }]
+                          );
                           setForm((prev) => ({
                             ...prev,
                             acceptedAssets: prev.acceptedAssets.includes(asset)
@@ -436,7 +464,7 @@ export default function CreatePage() {
                           }));
                         }}
                         className={`rounded-xl border px-4 py-2 text-xs font-semibold transition ${
-                          form.acceptedAssets.includes(asset)
+                          assets.some((a) => a.code === asset)
                             ? "border-mint bg-mint/10 text-mint"
                             : "border-white/10 bg-white/5 text-steel hover:border-white/20"
                         }`}
@@ -445,6 +473,46 @@ export default function CreatePage() {
                       </button>
                     ))}
                   </div>
+                  {assets.some((a) => a.code !== "XLM") && (
+                    <div className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                      <p className="text-[10px] uppercase tracking-[0.25em] text-steel">
+                        Asset issuers <span className="text-mint">*</span> — required for non-XLM assets
+                      </p>
+                      {assets
+                        .filter((a) => a.code !== "XLM")
+                        .map((asset) => (
+                          <div key={asset.code} className="flex flex-col gap-1.5">
+                            <label htmlFor={`issuer-${asset.code}`} className="text-xs font-medium text-steel">
+                              {asset.code} issuer
+                            </label>
+                            <input
+                              id={`issuer-${asset.code}`}
+                              type="text"
+                              placeholder={
+                                KNOWN_ISSUERS[asset.code] ? `Default: ${KNOWN_ISSUERS[asset.code].slice(0, 8)}…` : "G… Stellar issuer address"
+                              }
+                              value={asset.issuer}
+                              onChange={(e) => {
+                                const val = e.target.value.trim();
+                                setAssets((prev) =>
+                                  prev.map((p) => (p.code === asset.code ? { ...p, issuer: val } : p))
+                                );
+                              }}
+                              className={`w-full rounded-xl border bg-white/5 px-3 py-2 font-mono text-xs text-white placeholder:text-steel/40 focus:outline-none focus:ring-1 transition ${
+                                asset.issuer.trim() === ""
+                                  ? "border-amber-500/40 focus:border-amber-500/50 focus:ring-amber-500/20"
+                                  : "border-white/10 focus:border-mint/50 focus:ring-mint/20"
+                              }`}
+                            />
+                            {asset.issuer.trim() === "" && (
+                              <p className="text-[10px] text-amber-400">
+                                Issuer required — without it, this asset will not be accepted for payments.
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -453,7 +521,7 @@ export default function CreatePage() {
               <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="flex flex-col gap-2">
-                    <label className="text-[10px] uppercase tracking-[0.25em] text-steel">
+                    <label htmlFor="twitter-handle" className="text-[10px] uppercase tracking-[0.25em] text-steel">
                       Twitter / X
                     </label>
                     <div className="relative">
@@ -461,6 +529,7 @@ export default function CreatePage() {
                         @
                       </span>
                       <input
+                        id="twitter-handle"
                         type="text"
                         maxLength={15}
                         placeholder="handle"
@@ -477,10 +546,11 @@ export default function CreatePage() {
                   </div>
 
                   <div className="flex flex-col gap-2">
-                    <label className="text-[10px] uppercase tracking-[0.25em] text-steel">
+                    <label htmlFor="github-handle" className="text-[10px] uppercase tracking-[0.25em] text-steel">
                       GitHub
                     </label>
                     <input
+                      id="github-handle"
                       type="text"
                       maxLength={39}
                       placeholder="username"
@@ -497,10 +567,11 @@ export default function CreatePage() {
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <label className="text-[10px] uppercase tracking-[0.25em] text-steel">
+                  <label htmlFor="website-url" className="text-[10px] uppercase tracking-[0.25em] text-steel">
                     Website
                   </label>
                   <input
+                    id="website-url"
                     type="url"
                     placeholder="https://yoursite.com"
                     value={form.websiteUrl}
@@ -515,10 +586,11 @@ export default function CreatePage() {
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <label className="text-[10px] uppercase tracking-[0.25em] text-steel">
+                  <label htmlFor="email" className="text-[10px] uppercase tracking-[0.25em] text-steel">
                     Email (Private)
                   </label>
                   <input
+                    id="email"
                     type="email"
                     placeholder="you@example.com"
                     value={form.email}
@@ -564,8 +636,11 @@ export default function CreatePage() {
                 type="button"
                 onClick={handleSubmit}
                 disabled={loading || rateLimited}
-                className="flex-[2] rounded-full bg-mint px-5 py-4 text-sm font-semibold text-ink transition hover:bg-white active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-[2] flex items-center justify-center gap-2 rounded-full bg-mint px-5 py-4 text-sm font-semibold text-ink transition hover:bg-white active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
               >
+                {loading && (
+                  <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-ink border-t-transparent" />
+                )}
                 {rateLimited
                   ? `Try again in ${rateLimitRemainingMinutes} minute${rateLimitRemainingMinutes === 1 ? "" : "s"}`
                   : loading
@@ -577,7 +652,16 @@ export default function CreatePage() {
             </div>
 
             <p className="text-center text-[10px] uppercase tracking-[0.2em] text-steel/35">
-              By continuing you agree to the NovaSupport Protocol Terms.
+              By continuing you agree to the{" "}
+              <a
+                href="/terms"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline underline-offset-2 hover:text-steel/60 transition"
+              >
+                NovaSupport Protocol Terms
+              </a>
+              .
             </p>
           </div>
         </div>

@@ -454,7 +454,7 @@ async function main() {
 
   // Test 20: URL sanitization and validation
   await runTest("sanitizeString normalizes and validates URLs", async () => {
-    // Valid URL normalization
+    // Valid URL normalization — bare domains get https:// prefix and canonical trailing slash
     const { result: result1 } = sanitizeString("websiteUrl", "example.com");
     assert.equal(result1, "https://example.com/");
 
@@ -677,7 +677,8 @@ async function main() {
     await new Promise<void>((resolve) => sanitizeQuery(req, res, resolve as Parameters<typeof sanitizeQuery>[2]));
     
     const query = req.query as Record<string, unknown>;
-    assert.deepEqual(query.tags, ["tag1", "tag2", "tag3"]);
+    // sanitize-html strips <script> content entirely for safety — confirmed empty
+    assert.deepEqual(query.tags, ["tag1", "", "tag3"]);
     assert.equal(query.single, "value");
   });
 
@@ -1220,6 +1221,116 @@ async function main() {
       else process.env.SKIP_HORIZON_VALIDATION = prev;
     }
   });
+
+  // Test 42b: POST /support-transactions with recurringSupportExecutionId
+  if (hasDb) {
+    await runTest("POST /support-transactions with recurringSupportExecutionId validates details and updates status", async () => {
+      const srv = await startTestServer(makeLogStream().stream);
+      const prevSkip = process.env.SKIP_HORIZON_VALIDATION;
+      process.env.SKIP_HORIZON_VALIDATION = "true";
+
+      let userId: string | undefined;
+      let profileId: string | undefined;
+      let recurringId: string | undefined;
+      let executionId: string | undefined;
+
+      try {
+        const testWallet = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+        const user = await prisma.user.create({ data: { email: testWallet } });
+        userId = user.id;
+        const token = signJWT(testWallet, user.id);
+
+        const profile = await prisma.profile.create({
+          data: {
+            username: `recur-exec-${randomUUID().slice(0, 8)}`,
+            displayName: "Recur Exec Test",
+            bio: "",
+            walletAddress: testWallet,
+            ownerId: user.id,
+            acceptedAssets: { create: [{ code: "XLM" }] },
+          },
+        });
+        profileId = profile.id;
+
+        const nextRunAt = new Date();
+        const support = await prisma.recurringSupport.create({
+          data: {
+            supporterId: user.id,
+            supporterAddress: testWallet,
+            profileId,
+            amount: "10.0000000",
+            assetCode: "XLM",
+            frequency: "monthly",
+            nextRunAt,
+          },
+        });
+        recurringId = support.id;
+
+        const execution = await prisma.recurringSupportExecution.create({
+          data: {
+            recurringSupportId: support.id,
+            status: "pending",
+          },
+        });
+        executionId = execution.id;
+
+        // Try with mismatching details
+        const mismatchRes = await fetch(`${srv.baseUrl}/support-transactions`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            txHash: `exec-test-mismatch-${randomUUID()}`,
+            amount: "5.0000000", // should be 10.0000000
+            assetCode: "XLM",
+            recipientAddress: testWallet,
+            profileId,
+            stellarNetwork: "TESTNET",
+            recurringSupportExecutionId: executionId,
+          }),
+        });
+        assert.equal(mismatchRes.status, 400, `Expected 400 for mismatch, got ${mismatchRes.status}`);
+
+        // Try with matching details
+        const matchRes = await fetch(`${srv.baseUrl}/support-transactions`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            txHash: `exec-test-match-${randomUUID()}`,
+            amount: "10.0000000",
+            assetCode: "XLM",
+            recipientAddress: testWallet,
+            profileId,
+            stellarNetwork: "TESTNET",
+            recurringSupportExecutionId: executionId,
+          }),
+        });
+        assert.equal(matchRes.status, 200, `Expected 200/201, got ${matchRes.status}`);
+
+        const execCheck = await prisma.recurringSupportExecution.findUnique({
+          where: { id: executionId },
+        });
+        assert.equal(execCheck?.status, "success", "Execution status should be updated to success");
+      } finally {
+        await srv.close();
+        if (prevSkip === undefined) delete process.env.SKIP_HORIZON_VALIDATION;
+        else process.env.SKIP_HORIZON_VALIDATION = prevSkip;
+
+        if (executionId) await prisma.recurringSupportExecution.deleteMany({ where: { id: executionId } });
+        if (recurringId) await prisma.recurringSupport.deleteMany({ where: { id: recurringId } });
+        if (profileId) {
+          await prisma.acceptedAsset.deleteMany({ where: { profileId } });
+          await prisma.profile.deleteMany({ where: { id: profileId } });
+        }
+        if (userId) await prisma.user.deleteMany({ where: { id: userId } });
+      }
+    });
+  }
 
   // ── Issue #447: Leaderboard caching ──────────────────────────────────
   if (hasDb) {

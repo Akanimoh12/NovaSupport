@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import {
   getAvailableWallets,
   getWalletAdapter,
@@ -20,15 +21,38 @@ type WalletConnectProps = {
 };
 
 export function WalletConnect({ onConnect }: WalletConnectProps = {}) {
+  const router = useRouter();
   const [address, setAddress] = useState<string | null>(null);
   const [activeWallet, setActiveWallet] = useState<WalletId | null>(null);
   const [available, setAvailable] = useState<WalletAdapter[]>([]);
   const [status, setStatus] = useState("Choose a wallet to connect.");
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [connectingWalletId, setConnectingWalletId] = useState<WalletId | null>(null);
 
   useEffect(() => {
-    setAvailable(getAvailableWallets());
+    // Wallet extensions inject their global object asynchronously — checking
+    // only once on mount races against that injection and loses on first load.
+    // Strategy: re-check on window `load` (all scripts done) and after two
+    // short delays (100 ms catches fast injectors, 1 000 ms catches slow ones).
+    // Any signal that fires after a wallet appears will update the list without
+    // requiring a manual refresh.
+    function refresh() {
+      setAvailable(getAvailableWallets());
+    }
+
+    refresh(); // synchronous best-effort check on mount
+
+    const t1 = setTimeout(refresh, 100);
+    const t2 = setTimeout(refresh, 1000);
+
+    window.addEventListener("load", refresh);
+
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      window.removeEventListener("load", refresh);
+    };
   }, []);
 
   useEffect(() => {
@@ -48,6 +72,7 @@ export function WalletConnect({ onConnect }: WalletConnectProps = {}) {
     if (!adapter) return;
 
     setConnecting(true);
+    setConnectingWalletId(walletId);
     setError(null);
     setStatus(`Connecting to ${adapter.name}...`);
 
@@ -59,12 +84,19 @@ export function WalletConnect({ onConnect }: WalletConnectProps = {}) {
       setActiveWallet(walletId);
       setStatus(`${adapter.name} connected`);
       onConnect?.(pubkey);
+
+      const redirectPath = localStorage.getItem("redirectAfterLogin");
+      if (redirectPath) {
+        localStorage.removeItem("redirectAfterLogin");
+        router.replace(redirectPath);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : `Failed to connect ${adapter.name}.`;
       setError(msg);
       setStatus("Connection failed.");
     } finally {
       setConnecting(false);
+      setConnectingWalletId(null);
     }
   }, [onConnect]);
 
@@ -144,7 +176,7 @@ export function WalletConnect({ onConnect }: WalletConnectProps = {}) {
                   <p className="text-sm font-semibold text-white">{wallet.name}</p>
                   <p className="text-xs text-sky/60">Click to connect</p>
                 </div>
-                {connecting && activeWallet === wallet.id && (
+                {connectingWalletId === wallet.id && (
                   <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-mint border-t-transparent" />
                 )}
               </button>

@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import FocusTrap from "focus-trap-react";
 import { QRCodeSVG } from "qrcode.react";
 import { QrCode, X, Download, Copy, Check } from "lucide-react";
 import { SITE_URL } from "@/lib/config";
+import { SHARE_DONE_KEY_PREFIX } from "@/components/onboarding-checklist";
 
 type QRCodeButtonProps = {
   username: string;
@@ -12,9 +14,16 @@ type QRCodeButtonProps = {
 export function QRCodeButton({ username }: QRCodeButtonProps) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [downloadError, setDownloadError] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   const qrRef = useRef<HTMLDivElement>(null);
   const profileUrl = `${typeof window !== "undefined" ? window.location.origin : SITE_URL}/profile/${username}`;
+
+  function markShared() {
+    if (typeof window !== "undefined") {
+      localStorage.setItem(`${SHARE_DONE_KEY_PREFIX}${username}`, "true");
+    }
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -38,6 +47,8 @@ export function QRCodeButton({ username }: QRCodeButtonProps) {
   }, [open]);
 
   const handleDownload = useCallback(() => {
+    setDownloadError(false);
+
     const svgEl = qrRef.current?.querySelector("svg");
     if (!svgEl) return;
 
@@ -45,6 +56,14 @@ export function QRCodeButton({ username }: QRCodeButtonProps) {
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+
+    let dataUri: string;
+    try {
+      dataUri = `data:image/svg+xml;base64,${btoa(svgData)}`;
+    } catch {
+      setDownloadError(true);
+      return;
+    }
 
     const img = new Image();
     img.onload = () => {
@@ -58,13 +77,18 @@ export function QRCodeButton({ username }: QRCodeButtonProps) {
       link.download = `novasupport-${username}-qr.png`;
       link.href = pngUrl;
       link.click();
+      markShared();
     };
-    img.src = `data:image/svg+xml;base64,${btoa(svgData)}`;
+    img.onerror = () => {
+      setDownloadError(true);
+    };
+    img.src = dataUri;
   }, [username]);
 
   const handleCopyUrl = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(profileUrl);
+      markShared();
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -75,6 +99,7 @@ export function QRCodeButton({ username }: QRCodeButtonProps) {
       textarea.select();
       document.execCommand("copy");
       document.body.removeChild(textarea);
+      markShared();
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -99,51 +124,63 @@ export function QRCodeButton({ username }: QRCodeButtonProps) {
             className="fixed inset-0 z-40 bg-black/60 sm:hidden"
             onClick={() => setOpen(false)}
           />
-          <div
-            ref={popoverRef}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Profile QR code"
-            className="absolute left-1/2 top-full z-50 mt-2 w-[260px] -translate-x-1/2 rounded-2xl border border-white/10 bg-[#0A0A0B] p-5 shadow-2xl sm:left-0 sm:translate-x-0"
+          <FocusTrap
+            focusTrapOptions={{
+              escapeDeactivates: false, // Escape is handled by the keydown listener above
+              allowOutsideClick: true,
+            }}
           >
-            <div className="mb-3 flex items-center justify-between gap-6">
-              <p className="text-xs font-semibold uppercase tracking-widest text-steel">
-                Scan to support
+            <div
+              ref={popoverRef}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Profile QR code"
+              className="absolute left-1/2 top-full z-50 mt-2 w-[260px] -translate-x-1/2 rounded-2xl border border-white/10 bg-[#0A0A0B] p-5 shadow-2xl sm:left-0 sm:translate-x-0"
+            >
+              <div className="mb-3 flex items-center justify-between gap-6">
+                <p className="text-xs font-semibold uppercase tracking-widest text-steel">
+                  Scan to support
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  aria-label="Close QR code"
+                  className="rounded-lg p-1 text-steel transition hover:text-white"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              <div ref={qrRef} className="flex justify-center rounded-xl bg-white p-3">
+                <QRCodeSVG value={profileUrl} size={180} />
+              </div>
+              <p className="mt-3 break-all text-center text-[10px] text-steel">
+                {profileUrl}
               </p>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                aria-label="Close QR code"
-                className="rounded-lg p-1 text-steel transition hover:text-white"
-              >
-                <X size={14} />
-              </button>
+              <div className="mt-4 flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-white transition hover:bg-white/10"
+                >
+                  <Download size={12} />
+                  Download
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopyUrl}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-white transition hover:bg-white/10"
+                >
+                  {copied ? <Check size={12} /> : <Copy size={12} />}
+                  {copied ? "Copied" : "Copy URL"}
+                </button>
+              </div>
+              {downloadError && (
+                <p className="mt-2 text-center text-[10px] text-red-400">
+                  Download failed. Please try again.
+                </p>
+              )}
             </div>
-            <div ref={qrRef} className="flex justify-center rounded-xl bg-white p-3">
-              <QRCodeSVG value={profileUrl} size={180} />
-            </div>
-            <p className="mt-3 break-all text-center text-[10px] text-steel">
-              {profileUrl}
-            </p>
-            <div className="mt-4 flex gap-2">
-              <button
-                type="button"
-                onClick={handleDownload}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-white transition hover:bg-white/10"
-              >
-                <Download size={12} />
-                Download
-              </button>
-              <button
-                type="button"
-                onClick={handleCopyUrl}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-white transition hover:bg-white/10"
-              >
-                {copied ? <Check size={12} /> : <Copy size={12} />}
-                {copied ? "Copied" : "Copy URL"}
-              </button>
-            </div>
-          </div>
+          </FocusTrap>
         </>
       )}
     </div>

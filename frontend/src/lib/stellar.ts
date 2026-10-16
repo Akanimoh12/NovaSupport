@@ -25,7 +25,7 @@ export type { WalletAdapter, WalletId, WalletErrorCode, SignTransactionOptions }
 export const stellarConfig = {
   horizonUrl: HORIZON_URL,
   stellarNetwork: STELLAR_NETWORK,
-  networkPassphrase: NETWORK_PASSPHRASE
+  networkPassphrase: getDefaultNetworkPassphrase()
 };
 
 
@@ -130,14 +130,22 @@ export function classifyStellarError(error: unknown): ClassifiedStellarError {
     };
   }
 
+  if (isAbortError(error)) {
+    return {
+      kind: "unknown",
+      retryable: false,
+      userMessage:
+        "The Stellar request was cancelled. Please try again if needed.",
+    };
+  }
+
   const message = errorMessage(error).toLowerCase();
   if (
     message.includes("network") ||
     message.includes("timeout") ||
     message.includes("etimedout") ||
     message.includes("econnrefused") ||
-    message.includes("fetch failed") ||
-    message.includes("aborted")
+    message.includes("fetch failed")
   ) {
     return {
       kind: "network",
@@ -167,6 +175,18 @@ function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (typeof error === "string") return error;
   return "";
+}
+
+function isAbortError(error: unknown): boolean {
+  if (!error) return false;
+  if (typeof error === "string") return error.toLowerCase().includes("abort");
+  if (typeof error !== "object") return false;
+  const e = error as { name?: string; code?: string; message?: string };
+  return (
+    e.name === "AbortError" ||
+    e.code === "ABORT_ERR" ||
+    e.message?.toLowerCase().includes("abort") === true
+  );
 }
 
 export interface RetryOptions {
@@ -242,9 +262,7 @@ export function stellarExpertUrl(type: "tx" | "account" | "contract", id: string
 }
 
 export function getDefaultNetworkPassphrase(): string {
-  return stellarConfig.stellarNetwork === "PUBLIC"
-    ? Networks.PUBLIC
-    : Networks.TESTNET;
+  return NETWORK_PASSPHRASE;
 }
 
 type SupportIntentInput = {
@@ -349,7 +367,10 @@ export async function buildPathPaymentIntent({
 
   const bestPath = paths.records[0];
   const estimatedDestAmount = bestPath.destination_amount;
-  const destMin = (parseFloat(estimatedDestAmount) * (1 - slippageTolerance)).toFixed(7);
+  const destMin = calculateDestinationMinimum(
+    estimatedDestAmount,
+    slippageTolerance,
+  );
 
   const account = await withStellarRetry(() =>
     horizonServer.loadAccount(sourceAccount),
@@ -378,4 +399,43 @@ export async function buildPathPaymentIntent({
   }
 
   return transaction.build().toXDR();
+}
+
+export function calculateDestinationMinimum(
+  amount: string,
+  slippageTolerance: number,
+): string {
+  if (
+    !Number.isFinite(slippageTolerance) ||
+    slippageTolerance < 0 ||
+    slippageTolerance >= 1
+  ) {
+    throw new Error("Slippage tolerance must be between 0 and 1.");
+  }
+
+  const [amountInteger, amountFraction = ""] = amount.split(".");
+  if (!/^\d+$/.test(amountInteger) || !/^\d*$/.test(amountFraction)) {
+    throw new Error("Stellar amount must be a decimal number.");
+  }
+
+  const amountScale = 10n ** BigInt(amountFraction.length);
+  const amountNumerator = BigInt(amountInteger) * amountScale +
+    BigInt(amountFraction || "0");
+  const slippageText = slippageTolerance.toString();
+  const [slippageInteger, slippageFraction = ""] = slippageText.split(".");
+  const slippageScale = 10n ** BigInt(slippageFraction.length);
+  const slippageNumerator =
+    BigInt(slippageInteger) * slippageScale +
+    BigInt(slippageFraction || "0");
+  const numerator =
+    amountNumerator * (slippageScale - slippageNumerator) * 10n ** 7n;
+  const denominator = amountScale * slippageScale;
+  let minimumUnits = numerator / denominator;
+  if ((numerator % denominator) * 2n >= denominator) {
+    minimumUnits += 1n;
+  }
+
+  const whole = minimumUnits / 10n ** 7n;
+  const fraction = (minimumUnits % 10n ** 7n).toString().padStart(7, "0");
+  return `${whole}.${fraction}`;
 }

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { WalletConnect } from "@/components/wallet-connect";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { getNetworkLabel } from "@/lib/stellar";
@@ -21,6 +22,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [isSearching, setIsSearching] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
   const timeoutRef = useRef<NodeJS.Timeout>();
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -52,34 +54,50 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       clearTimeout(timeoutRef.current);
     }
 
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
     if (!searchQuery.trim()) {
       setSearchResults([]);
       setShowDropdown(false);
       return;
     }
 
+    // Open the dropdown up front. It used to be opened only once results came
+    // back, in the same tick that cleared isSearching — so the "Searching…"
+    // state was never actually rendered for a fresh search (#1063).
     setIsSearching(true);
+    setShowDropdown(true);
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     timeoutRef.current = setTimeout(async () => {
       try {
         const response = await fetch(
           `${API_BASE_URL}/profiles/search?q=${encodeURIComponent(searchQuery)}`,
+          { signal: controller.signal },
         );
 
         if (response.ok) {
           const data = await response.json();
           setSearchResults(data);
-          setShowDropdown(true);
         } else {
+          // A failed lookup closes the dropdown rather than claiming
+          // "No results found", which would misreport the failure.
           setSearchResults([]);
           setShowDropdown(false);
         }
       } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
         console.error("Search error:", error);
         setSearchResults([]);
         setShowDropdown(false);
       } finally {
-        setIsSearching(false);
+        if (!controller.signal.aborted) {
+          setIsSearching(false);
+        }
       }
     }, 300);
 
@@ -87,6 +105,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }
+      controller.abort();
     };
   }, [searchQuery]);
 
@@ -129,6 +148,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <Link href="/create" className="hover:text-white transition">
                   Create draft
                 </Link>
+                <Link href="/recurring" className="hover:text-white transition">
+                  Recurring support
+                </Link>
+                <Link href="/settings" className="hover:text-white transition">
+                  Settings
+                </Link>
               </nav>
               <ThemeToggle />
             </div>
@@ -161,14 +186,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         className="flex items-center gap-3 px-4 py-3 hover:bg-white/5 dark:hover:bg-white/10 transition border-b border-white/5 dark:border-white/10 last:border-0"
                       >
                         {result.avatarUrl ? (
-                          <img
+                          <Image
                             src={result.avatarUrl}
                             alt={result.displayName}
+                            width={40}
+                            height={40}
                             className="h-10 w-10 rounded-full object-cover"
                           />
                         ) : (
                           <div className="h-10 w-10 rounded-full bg-gradient-to-br from-mint to-gold flex items-center justify-center text-sm font-bold text-ink">
-                            {result.displayName[0].toUpperCase()}
+                            {(result.displayName?.[0] || '?').toUpperCase()}
                           </div>
                         )}
                         <div className="flex-1 min-w-0">

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { Toast } from "@/components/toast";
+import { OnboardingChecklist } from "@/components/onboarding-checklist";
 import { 
   TrendingUp, Users, Wallet, Activity, 
   ArrowUpRight, ArrowDownRight, Plus, Edit2, Trash2, X, Link2, Eye, EyeOff, Copy, Check, ChevronDown, ChevronRight, Download
@@ -12,8 +13,7 @@ import {
 import { motion } from "framer-motion";
 import { formatRateLimitedMessage, parseRateLimitInfo } from "@/lib/rate-limit";
 import { apiFetch } from "@/lib/api-client";
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
+import { API_BASE_URL } from "@/lib/config";
 
 interface Stats {
   totalEarned: number;
@@ -29,6 +29,7 @@ interface Milestone {
   targetAmount: string;
   currentAmount: string;
   assetCode: string;
+  assetIssuer?: string | null;
   status: string;
   createdAt: string;
 }
@@ -38,6 +39,12 @@ interface MilestoneFormData {
   description: string;
   targetAmount: string;
   assetCode: string;
+  assetIssuer: string | null;
+}
+
+interface AcceptedAsset {
+  code: string;
+  issuer?: string | null;
 }
 
 interface Webhook {
@@ -56,6 +63,12 @@ interface WebhookDelivery {
   createdAt: string;
 }
 
+// Surface the backend's `error` field when present, like the profile-edit page does.
+async function readErrorMessage(res: Response, fallback: string): Promise<string> {
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  return typeof json.error === "string" ? json.error : fallback;
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const [username, setUsername] = useState<string | null>(null);
@@ -70,7 +83,9 @@ export default function DashboardPage() {
     description: "",
     targetAmount: "",
     assetCode: "XLM",
+    assetIssuer: null,
   });
+  const [acceptedAssets, setAcceptedAssets] = useState<AcceptedAsset[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
@@ -87,23 +102,40 @@ export default function DashboardPage() {
   const [csvLoading, setCsvLoading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [embedCopied, setEmbedCopied] = useState(false);
+  const [trends, setTrends] = useState({
+    totalEarned: "—",
+    totalEarnedPositive: true,
+    totalSupporters: "—",
+    totalSupportersPositive: true,
+    totalTransactions: "—",
+    totalTransactionsPositive: true,
+  });
 
   useEffect(() => {
     async function loadDashboard() {
       try {
-        // Get username from localStorage or session
-        const storedUsername = localStorage.getItem("username");
-        if (!storedUsername) {
+        const meRes = await apiFetch(`${API_BASE_URL}/auth/me`, {
+          suppressAuthExpired: true,
+        } as RequestInit & { suppressAuthExpired?: boolean });
+        if (!meRes.ok) {
           router.push("/");
           return;
         }
 
-        setUsername(storedUsername);
+        const me = await meRes.json();
+        const resolvedUsername = typeof me?.username === "string" ? me.username : null;
+        if (!resolvedUsername) {
+          router.push("/");
+          return;
+        }
 
-        const [statsRes, milestonesRes, webhooksRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/profiles/${storedUsername}/stats`),
-          fetch(`${API_BASE_URL}/profiles/${storedUsername}/milestones`),
-          fetch(`${API_BASE_URL}/profiles/${storedUsername}/webhooks`),
+        setUsername(resolvedUsername);
+
+        const [statsRes, milestonesRes, webhooksRes, profileRes] = await Promise.all([
+          apiFetch(`${API_BASE_URL}/profiles/${resolvedUsername}/stats`),
+          apiFetch(`${API_BASE_URL}/profiles/${resolvedUsername}/milestones`),
+          apiFetch(`${API_BASE_URL}/profiles/${resolvedUsername}/webhooks`),
+          apiFetch(`${API_BASE_URL}/profiles/${resolvedUsername}`),
         ]);
 
         if (statsRes.ok) {
@@ -120,6 +152,11 @@ export default function DashboardPage() {
           const webhooksData = await webhooksRes.json();
           setWebhooks(webhooksData.webhooks || []);
         }
+
+        if (profileRes.ok) {
+          const profileData = await profileRes.json();
+          setAcceptedAssets(profileData.acceptedAssets || []);
+        }
       } catch (err: any) {
         setError(err.message);
       } finally {
@@ -130,9 +167,92 @@ export default function DashboardPage() {
     loadDashboard();
   }, [router]);
 
+  // Fetch two consecutive 30-day periods and compute period-over-period trends (#1233)
+  useEffect(() => {
+    if (!username) return;
+
+    async function fetchTrends() {
+      try {
+        const now = new Date();
+        const periodEnd = now.toISOString();
+        const periodStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+        const prevStart = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000).toISOString();
+
+        const [currRes, prevRes] = await Promise.all([
+          apiFetch(
+            `${API_BASE_URL}/profiles/${username}/analytics/timeseries?period=daily&from=${encodeURIComponent(periodStart)}&to=${encodeURIComponent(periodEnd)}`,
+          ),
+          apiFetch(
+            `${API_BASE_URL}/profiles/${username}/analytics/timeseries?period=daily&from=${encodeURIComponent(prevStart)}&to=${encodeURIComponent(periodStart)}`,
+          ),
+        ]);
+
+        if (!currRes.ok || !prevRes.ok) return;
+
+        const [currJson, prevJson] = (await Promise.all([
+          currRes.json(),
+          prevRes.json(),
+        ])) as [
+          { data?: Array<{ amount: string; count: number; uniqueContributors: number }> },
+          { data?: Array<{ amount: string; count: number; uniqueContributors: number }> },
+        ];
+
+        const sum = (
+          arr: Array<{ amount: string; count: number; uniqueContributors: number }>,
+          key: "amount" | "count" | "uniqueContributors",
+        ) =>
+          arr.reduce(
+            (acc, d) => acc + (key === "amount" ? Number(d.amount) : key === "count" ? d.count : d.uniqueContributors),
+            0,
+          );
+
+        const currAmount = sum(currJson.data ?? [], "amount");
+        const prevAmount = sum(prevJson.data ?? [], "amount");
+        const currCount = sum(currJson.data ?? [], "count");
+        const prevCount = sum(prevJson.data ?? [], "count");
+        const currSupporters = sum(currJson.data ?? [], "uniqueContributors");
+        const prevSupporters = sum(prevJson.data ?? [], "uniqueContributors");
+
+        function formatTrend(curr: number, prev: number): { label: string; positive: boolean } {
+          if (prev === 0)
+            return curr === 0
+              ? { label: "No change", positive: true }
+              : { label: "+100%", positive: true };
+          const pct = ((curr - prev) / prev) * 100;
+          if (pct === 0) return { label: "No change", positive: true };
+          const sign = pct > 0 ? "+" : "";
+          return { label: `${sign}${pct.toFixed(1)}%`, positive: pct >= 0 };
+        }
+
+        const earnedTrend = formatTrend(currAmount, prevAmount);
+        const supportersTrend = formatTrend(currSupporters, prevSupporters);
+        const txTrend = formatTrend(currCount, prevCount);
+
+        setTrends({
+          totalEarned: earnedTrend.label,
+          totalEarnedPositive: earnedTrend.positive,
+          totalSupporters: supportersTrend.label,
+          totalSupportersPositive: supportersTrend.positive,
+          totalTransactions: txTrend.label,
+          totalTransactionsPositive: txTrend.positive,
+        });
+      } catch {
+        // leave defaults ("—")
+      }
+    }
+
+    fetchTrends();
+  }, [username]);
+
   const handleAddMilestone = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username || !formData.title || !formData.targetAmount) return;
+    if (!username || !formData.title.trim() || !formData.targetAmount) return;
+
+    const targetAmount = Number(formData.targetAmount);
+    if (!Number.isFinite(targetAmount) || targetAmount <= 0) {
+      setToast({ message: "Target amount must be a positive number.", type: "error" });
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -141,7 +261,7 @@ export default function DashboardPage() {
         ? `${API_BASE_URL}/profiles/${username}/milestones/${editingMilestone.id}`
         : `${API_BASE_URL}/profiles/${username}/milestones`;
 
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -149,15 +269,16 @@ export default function DashboardPage() {
           description: formData.description || null,
           targetAmount: formData.targetAmount,
           assetCode: formData.assetCode,
+          assetIssuer: formData.assetIssuer,
         }),
       });
 
       if (!res.ok) {
         if (res.status === 429) {
-          alert(formatRateLimitedMessage(parseRateLimitInfo(res.headers)));
+          setToast({ message: formatRateLimitedMessage(parseRateLimitInfo(res.headers)), type: "error" });
           return;
         }
-        throw new Error("Failed to save milestone");
+        throw new Error(await readErrorMessage(res, "Failed to save milestone"));
       }
 
       const newMilestone = await res.json();
@@ -168,11 +289,11 @@ export default function DashboardPage() {
         setMilestones([newMilestone, ...milestones]);
       }
 
-      setFormData({ title: "", description: "", targetAmount: "", assetCode: "XLM" });
+      setFormData({ title: "", description: "", targetAmount: "", assetCode: "XLM", assetIssuer: null });
       setShowMilestoneForm(false);
       setEditingMilestone(null);
     } catch (err: any) {
-      alert(err.message);
+      setToast({ message: err.message, type: "error" });
     } finally {
       setSubmitting(false);
     }
@@ -185,6 +306,7 @@ export default function DashboardPage() {
       description: milestone.description || "",
       targetAmount: milestone.targetAmount,
       assetCode: milestone.assetCode,
+      assetIssuer: milestone.assetIssuer ?? null,
     });
     setShowMilestoneForm(true);
   };
@@ -193,30 +315,30 @@ export default function DashboardPage() {
     if (!username) return;
 
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `${API_BASE_URL}/profiles/${username}/milestones/${milestoneId}`,
         { method: "DELETE" }
       );
 
       if (!res.ok) {
         if (res.status === 429) {
-          alert(formatRateLimitedMessage(parseRateLimitInfo(res.headers)));
+          setToast({ message: formatRateLimitedMessage(parseRateLimitInfo(res.headers)), type: "error" });
           return;
         }
-        throw new Error("Failed to delete milestone");
+        throw new Error(await readErrorMessage(res, "Failed to delete milestone"));
       }
 
       setMilestones(milestones.filter((m) => m.id !== milestoneId));
       setDeleteConfirm(null);
     } catch (err: any) {
-      alert(err.message);
+      setToast({ message: err.message, type: "error" });
     }
   };
 
   const cancelForm = () => {
     setShowMilestoneForm(false);
     setEditingMilestone(null);
-    setFormData({ title: "", description: "", targetAmount: "", assetCode: "XLM" });
+    setFormData({ title: "", description: "", targetAmount: "", assetCode: "XLM", assetIssuer: null });
   };
 
   const handleAddWebhook = async (e: React.FormEvent) => {
@@ -225,13 +347,13 @@ export default function DashboardPage() {
 
     setWebhookSubmitting(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/profiles/${username}/webhooks`, {
+      const res = await apiFetch(`${API_BASE_URL}/profiles/${username}/webhooks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: webhookUrl }),
       });
 
-      if (!res.ok) throw new Error("Failed to add webhook");
+      if (!res.ok) throw new Error(await readErrorMessage(res, "Failed to add webhook"));
 
       const newWebhook = await res.json();
       setWebhooks([newWebhook, ...webhooks]);
@@ -239,7 +361,7 @@ export default function DashboardPage() {
       setWebhookUrl("");
       setShowWebhookForm(false);
     } catch (err: any) {
-      alert(err.message);
+      setToast({ message: err.message, type: "error" });
     } finally {
       setWebhookSubmitting(false);
     }
@@ -249,17 +371,17 @@ export default function DashboardPage() {
     if (!username) return;
 
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `${API_BASE_URL}/profiles/${username}/webhooks/${webhookId}`,
         { method: "DELETE" }
       );
 
-      if (!res.ok) throw new Error("Failed to delete webhook");
+      if (!res.ok) throw new Error(await readErrorMessage(res, "Failed to delete webhook"));
 
       setWebhooks(webhooks.filter((w) => w.id !== webhookId));
       setWebhookDeleteConfirm(null);
     } catch (err: any) {
-      alert(err.message);
+      setToast({ message: err.message, type: "error" });
     }
   };
 
@@ -273,7 +395,7 @@ export default function DashboardPage() {
     if (!deliveries[webhookId]) {
       setDeliveriesLoading(webhookId);
       try {
-        const res = await fetch(
+        const res = await apiFetch(
           `${API_BASE_URL}/profiles/${username}/webhooks/${webhookId}/deliveries`
         );
         if (res.ok) {
@@ -330,8 +452,10 @@ export default function DashboardPage() {
     }
   };
 
-  const getEmbedCode = (user: string) =>
-    `<iframe\n  src="https://novasupport.xyz/embed/${user}"\n  width="400"\n  height="320"\n  frameborder="0"\n  style="border-radius:16px"\n></iframe>`;
+  const getEmbedCode = (user: string) => {
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    return `<iframe\n  src="${origin}/embed/${user}"\n  width="400"\n  height="320"\n  frameborder="0"\n  style="border-radius:16px"\n></iframe>`;
+  };
 
   const handleCopyEmbed = async () => {
     if (!username) return;
@@ -371,6 +495,37 @@ export default function DashboardPage() {
     );
   }
 
+  // Build the asset dropdown from the profile's actual accepted assets so a
+  // creator can only pick what they actually accept. Fall back to the default
+  // assets when none are configured. Always ensure the currently-selected
+  // asset (e.g. one being edited) is present in the list.
+  const assetOptions: AcceptedAsset[] = (() => {
+    const base: AcceptedAsset[] =
+      acceptedAssets.length > 0
+        ? acceptedAssets
+        : [
+            { code: "XLM", issuer: null },
+            { code: "USDC", issuer: null },
+            { code: "AQUA", issuer: null },
+          ];
+    const exists = base.some(
+      (a) => a.code === formData.assetCode && (a.issuer ?? "") === (formData.assetIssuer ?? ""),
+    );
+    if (!exists && formData.assetCode) {
+      return [...base, { code: formData.assetCode, issuer: formData.assetIssuer }];
+    }
+    return base;
+  })();
+
+  const selectedAssetIndex = assetOptions.findIndex(
+    (a) => a.code === formData.assetCode && (a.issuer ?? "") === (formData.assetIssuer ?? ""),
+  );
+
+  const renderAssetLabel = (a: AcceptedAsset) =>
+    a.issuer
+      ? `${a.code} (${a.issuer.slice(0, 4)}…${a.issuer.slice(-4)})`
+      : a.code;
+
   return (
     <AppShell>
       <div className="mx-auto max-w-7xl space-y-8">
@@ -393,6 +548,10 @@ export default function DashboardPage() {
           </div>
         </header>
 
+        {username && (
+          <OnboardingChecklist username={username} milestoneCount={milestones.length} />
+        )}
+
         {/* Summary Cards */}
         {stats && (
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -400,22 +559,22 @@ export default function DashboardPage() {
               title="Total Earned" 
               value={`${stats.totalEarned.toLocaleString(undefined, { maximumFractionDigits: 2 })} XLM`}
               icon={<Wallet className="text-mint" />}
-              trend="+12.5%"
-              positive={true}
+              trend={trends.totalEarned}
+              positive={trends.totalEarnedPositive}
             />
             <StatCard 
               title="Total Supporters" 
               value={stats.uniqueSupporters.toString()}
               icon={<Users className="text-sky" />}
-              trend="+8"
-              positive={true}
+              trend={trends.totalSupporters}
+              positive={trends.totalSupportersPositive}
             />
             <StatCard 
               title="Total Transactions" 
               value={stats.totalTransactions.toString()}
               icon={<Activity className="text-gold" />}
-              trend="Stable"
-              positive={true}
+              trend={trends.totalTransactions}
+              positive={trends.totalTransactionsPositive}
             />
           </div>
         )}
@@ -479,6 +638,7 @@ export default function DashboardPage() {
                     </label>
                     <input
                       type="number"
+                      min="0.01"
                       step="0.01"
                       value={formData.targetAmount}
                       onChange={(e) => setFormData({ ...formData, targetAmount: e.target.value })}
@@ -493,13 +653,22 @@ export default function DashboardPage() {
                       Asset
                     </label>
                     <select
-                      value={formData.assetCode}
-                      onChange={(e) => setFormData({ ...formData, assetCode: e.target.value })}
+                      value={selectedAssetIndex < 0 ? "" : selectedAssetIndex}
+                      onChange={(e) => {
+                        const opt = assetOptions[Number(e.target.value)];
+                        setFormData({
+                          ...formData,
+                          assetCode: opt.code,
+                          assetIssuer: opt.issuer ?? null,
+                        });
+                      }}
                       className="mt-2 min-h-[44px] w-full rounded-lg bg-white/5 border border-white/10 px-3 py-3 text-sm text-white focus:outline-none focus:border-mint/50"
                     >
-                      <option value="XLM">XLM</option>
-                      <option value="USDC">USDC</option>
-                      <option value="AQUA">AQUA</option>
+                      {assetOptions.map((a, i) => (
+                        <option key={i} value={i}>
+                          {renderAssetLabel(a)}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>
@@ -532,10 +701,14 @@ export default function DashboardPage() {
           ) : (
             <div className="space-y-3">
               {milestones.map((milestone) => {
-                const progress = Math.min(
-                  (parseFloat(milestone.currentAmount) / parseFloat(milestone.targetAmount)) * 100,
-                  100
-                );
+                const currentAmount = parseFloat(milestone.currentAmount);
+                const targetAmount = parseFloat(milestone.targetAmount);
+                const progress =
+                  Number.isFinite(currentAmount) &&
+                  Number.isFinite(targetAmount) &&
+                  targetAmount > 0
+                    ? Math.min((currentAmount / targetAmount) * 100, 100)
+                    : 0;
 
                 return (
                   <motion.div
@@ -558,6 +731,7 @@ export default function DashboardPage() {
                       <div className="flex gap-2">
                         <button
                           onClick={() => handleEditMilestone(milestone)}
+                          aria-label={`Edit milestone: ${milestone.title}`}
                           className="min-h-[44px] min-w-[44px] rounded-lg bg-white/5 p-2 text-steel hover:bg-white/10 transition-colors"
                           title="Edit"
                         >
@@ -565,6 +739,7 @@ export default function DashboardPage() {
                         </button>
                         <button
                           onClick={() => setDeleteConfirm(milestone.id)}
+                          aria-label={`Delete milestone: ${milestone.title}`}
                           className="min-h-[44px] min-w-[44px] rounded-lg bg-white/5 p-2 text-red-400 hover:bg-red-500/10 transition-colors"
                           title="Delete"
                         >
@@ -748,6 +923,7 @@ export default function DashboardPage() {
                       <div className="flex gap-2">
                         <button
                           onClick={() => handleToggleDeliveries(webhook.id)}
+                          aria-label={expandedDeliveries === webhook.id ? "Hide webhook deliveries" : "View webhook deliveries"}
                           className="rounded-lg bg-white/5 p-2 text-steel hover:bg-white/10 transition-colors"
                           title="View deliveries"
                         >
@@ -755,6 +931,7 @@ export default function DashboardPage() {
                         </button>
                         <button
                           onClick={() => setWebhookDeleteConfirm(webhook.id)}
+                          aria-label={`Delete webhook for ${webhook.url}`}
                           className="rounded-lg bg-white/5 p-2 text-red-400 hover:bg-red-500/10 transition-colors"
                           title="Delete"
                         >
@@ -930,9 +1107,11 @@ function StatCard({ title, value, icon, trend, positive }: {
           {icon}
         </div>
         <div className={`flex items-center gap-1 text-[10px] font-bold uppercase tracking-tight ${
-          positive ? "text-mint" : trend === "Stable" ? "text-steel" : "text-red-400"
+          trend === "—" || trend === "No change" ? "text-steel" : positive ? "text-mint" : "text-red-400"
         }`}>
-          {positive ? <ArrowUpRight size={14} /> : trend === "Stable" ? null : <ArrowDownRight size={14} />}
+          {trend !== "—" && trend !== "No change" && (
+            positive ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />
+          )}
           {trend}
         </div>
       </div>

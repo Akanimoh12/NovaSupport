@@ -10,8 +10,23 @@ export type DeliveryResult =
   | { status: "success"; statusCode: number }
   | { status: "failed"; error: string; willRetry: boolean; nextRetryDelayMs?: number };
 
+export function canonicalJsonStringify(val: unknown): string {
+  if (val === null || typeof val !== "object") {
+    return JSON.stringify(val);
+  }
+  if (Array.isArray(val)) {
+    return "[" + val.map(canonicalJsonStringify).join(",") + "]";
+  }
+  const keys = Object.keys(val as Record<string, unknown>).sort();
+  const parts = keys.map((key) => {
+    const value = (val as Record<string, unknown>)[key];
+    return JSON.stringify(key) + ":" + canonicalJsonStringify(value);
+  });
+  return "{" + parts.join(",") + "}";
+}
+
 export function generateSignature(secret: string, payload: WebhookPayload): string {
-  const payloadString = JSON.stringify(payload);
+  const payloadString = canonicalJsonStringify(payload);
   return createHmac("sha256", secret).update(payloadString).digest("hex");
 }
 
@@ -36,7 +51,7 @@ export async function deliverWebhook(
   signal?: AbortSignal,
 ): Promise<DeliveryResult> {
   const signature = generateSignature(secret, payload);
-  const payloadString = JSON.stringify(payload);
+  const payloadString = canonicalJsonStringify(payload);
 
   const timeoutSignal = AbortSignal.timeout(DELIVERY_TIMEOUT_MS);
   const mergedSignal = signal
@@ -52,8 +67,20 @@ export async function deliverWebhook(
         "X-NovaSupport-Event": (payload.event as string) ?? "unknown",
       },
       body: payloadString,
+      redirect: "manual",
       signal: mergedSignal,
     });
+
+    if (
+      response.type === "opaqueredirect" ||
+      (response.status >= 300 && response.status < 400)
+    ) {
+      return {
+        status: "failed",
+        error: "HTTP 3xx redirects are not allowed",
+        willRetry: false,
+      };
+    }
 
     if (response.ok) {
       return { status: "success", statusCode: response.status };
@@ -61,7 +88,10 @@ export async function deliverWebhook(
     return {
       status: "failed",
       error: `HTTP ${response.status}`,
-      willRetry: response.status >= 500 || response.status === 429,
+      willRetry:
+        response.status >= 500 ||
+        response.status === 429 ||
+        response.status === 408,
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -83,7 +113,9 @@ export async function deliverWebhook(
 
 export function getNextRetryDelay(attemptCount: number): number | null {
   if (attemptCount >= BACKOFF_SCHEDULE_SECONDS.length) return null;
-  return BACKOFF_SCHEDULE_SECONDS[attemptCount] * 1000;
+  const baseMs = BACKOFF_SCHEDULE_SECONDS[attemptCount] * 1000;
+  const jitterPercent = (Math.random() * 40 - 20) / 100;
+  return Math.round(baseMs * (1 + jitterPercent));
 }
 
 export function shouldRetry(attemptCount: number): boolean {

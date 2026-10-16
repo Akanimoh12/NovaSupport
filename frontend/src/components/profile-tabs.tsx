@@ -10,8 +10,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { EmptyState } from "./empty-state";
 import { stellarExpertUrl } from "@/lib/stellar";
 import { useRouter } from "next/navigation";
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
+import { API_BASE_URL } from "@/lib/config";
 
 type Transaction = {
   id: string;
@@ -34,7 +33,7 @@ type Badge = {
   awardedAt: string;
 };
 
-// ── Date range presets ────────────────────────────────────────────────────────
+// ── Date range presets ───────────────────────────────────────────────────────��[...]
 type DatePreset = "all" | "7d" | "30d" | "custom";
 
 function getPresetRange(preset: DatePreset): { from: Date | null; to: Date | null } {
@@ -139,28 +138,49 @@ export function ProfileTabs({ username }: { username: string }) {
     };
   }, []);
 
+  // Abort the in-flight request whenever the query changes so a slower earlier
+  // response can never overwrite the results of a newer one (#1064).
   useEffect(() => {
+    const controller = new AbortController();
+    const isStale = () => controller.signal.aborted;
+
     if (activeTab === "history") {
       setLoading(true);
       const params = new URLSearchParams();
       if (debouncedSearch.trim()) params.set("q", debouncedSearch.trim());
       const url = `${API_BASE_URL}/profiles/${username}/transactions${params.toString() ? "?" + params.toString() : ""}`;
-      fetch(url)
+      fetch(url, { signal: controller.signal })
         .then(res => res.json())
         .then(data => {
+          if (isStale()) return;
           setTransactions(data.transactions || []);
         })
-        .catch(err => console.error(err))
-        .finally(() => setLoading(false));
+        .catch(err => {
+          if (err instanceof DOMException && err.name === "AbortError") return;
+          console.error(err);
+        })
+        .finally(() => {
+          if (!isStale()) setLoading(false);
+        });
     }
     if (activeTab === "badges") {
       setBadgesLoading(true);
-      fetch(`${API_BASE_URL}/profiles/${username}/badges`)
+      fetch(`${API_BASE_URL}/profiles/${username}/badges`, { signal: controller.signal })
         .then(res => res.json())
-        .then(data => setBadges(data.badges || []))
-        .catch(err => console.error(err))
-        .finally(() => setBadgesLoading(false));
+        .then(data => {
+          if (isStale()) return;
+          setBadges(data.badges || []);
+        })
+        .catch(err => {
+          if (err instanceof DOMException && err.name === "AbortError") return;
+          console.error(err);
+        })
+        .finally(() => {
+          if (!isStale()) setBadgesLoading(false);
+        });
     }
+
+    return () => controller.abort();
   }, [username, activeTab, debouncedSearch]);
 
   // ── Filtered transactions (date only; search handled by API) ──────────────
@@ -170,7 +190,13 @@ export function ProfileTabs({ username }: { username: string }) {
     const { from, to } = preset === "custom"
       ? {
           from: customFrom ? new Date(customFrom) : null,
-          to:   customTo   ? new Date(customTo)   : null,
+          // Use the viewer's local timezone when deriving the end-of-day for the
+          // custom "To" date so we include the entire selected local calendar day
+          // instead of a fixed UTC instant which would cut off viewers behind UTC.
+          to: customTo ? (() => {
+            const [y, m, d] = customTo.split("-").map(Number);
+            return new Date(y, (m || 1) - 1, d || 1, 23, 59, 59, 999);
+          })() : null,
         }
       : getPresetRange(preset);
 
@@ -237,7 +263,7 @@ export function ProfileTabs({ username }: { username: string }) {
                   value={search}
                   onChange={e => handleSearchChange(e.target.value)}
                   placeholder="Search by message…"
-                  className="w-full rounded-xl border border-white/10 bg-white/5 pl-9 pr-9 py-2 text-sm text-white placeholder:text-steel focus:border-mint/40 focus:outline-none focus:ring-1 focus:ring-mint/30 transition"
+                  className="w-full rounded-xl border border-white/10 bg-white/5 pl-9 pr-9 py-2 text-sm text-white placeholder:text-steel focus:border-mint/40 focus:outline-none focus:ring-1 focu[...]"
                 />
                 {search && (
                   <button
@@ -409,17 +435,13 @@ export function ProfileTabs({ username }: { username: string }) {
                       </>
                     )
                   ) : (
-                    <>
-                      <p className="text-gray-500 font-medium">No support yet</p>
-                      <p className="text-sm text-gray-400 mt-1">Be the first to support {username}!</p>
-                    </>
+                    <EmptyState
+                      variant="no-transactions"
+                      title="No transactions yet"
+                      description="Be the first to support this creator!"
+                    />
                   )}
                 </div>
-                <EmptyState
-                  variant="no-transactions"
-                  title="No transactions yet"
-                  description="Be the first to support this creator!"
-                />
               </>
             )}
           </motion.div>
@@ -460,11 +482,6 @@ export function ProfileTabs({ username }: { username: string }) {
                 <p className="text-sm mt-1">Achievement badges will appear here once earned.</p>
               </div>
             )}
-            <EmptyState
-              variant="default"
-              title="Badges coming soon"
-              description="Achievement badges will appear here once earned. Start supporting creators to be eligible!"
-            />
           </motion.div>
         )}
       </AnimatePresence>

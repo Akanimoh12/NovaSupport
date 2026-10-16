@@ -2,29 +2,39 @@
   "name": "novasupport-frontend",
   "version": "0.1.0",
   "private": true,
+  "engines": { "node": ">=22.0.0" },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@hookform/resolvers": "^5.4.0",
     "@stellar/freighter-api": "^4.1.0",
     "@stellar/stellar-sdk": "^13.3.0",
+    "@tanstack/react-query": "^5.101.4",
+    "@testing-library/dom": "^10.4.2",
     "clsx": "^2.1.1",
+    "focus-trap-react": "^10.3.1",
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.7.0",
     "next": "14.2.35",
     "qrcode.react": "^4.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-hook-form": "^7.82.0",
     "recharts": "^3.8.1",
-    "tailwind-merge": "^3.5.0"
+    "tailwind-merge": "^3.5.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.2.0",
+    "@testing-library/user-event": "^14.6.6",
     "@types/node": "^20.17.30",
     "@types/react": "^18.3.23",
     "@types/react-dom": "^18.3.7",

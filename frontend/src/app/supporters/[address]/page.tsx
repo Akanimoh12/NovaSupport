@@ -75,6 +75,17 @@ type SupporterData = {
   recentTransactions?: SupportTransaction[];
 };
 
+function emptySupporterData(address: string): SupporterData {
+  return {
+    address,
+    totalTransactions: 0,
+    profilesSupported: 0,
+    totalByAsset: [],
+    supportedProfiles: [],
+    transactions: [],
+  };
+}
+
 async function getSupporterData(address: string): Promise<SupporterData | null> {
   const res = await fetch(`${API_BASE_URL}/supporters/${address}`, {
     next: { revalidate: 60 },
@@ -82,6 +93,12 @@ async function getSupporterData(address: string): Promise<SupporterData | null> 
 
   if (res.status === 400) {
     notFound();
+  }
+
+  // A valid address with no support history is not an error — render the
+  // friendly zero-transaction empty state instead of "Supporter unavailable".
+  if (res.status === 404) {
+    return emptySupporterData(address);
   }
 
   if (!res.ok) {
@@ -116,7 +133,10 @@ function formatAmount(amount: string): string {
 export default async function SupporterPage({ params }: PageProps) {
   const { address } = params;
 
-  if (!StrKey.isValidEd25519PublicKey(address)) {
+  if (
+    !StrKey.isValidEd25519PublicKey(address) &&
+    !StrKey.isValidMed25519PublicKey(address)
+  ) {
     return (
       <AppShell>
         <div className="mx-auto max-w-4xl">
