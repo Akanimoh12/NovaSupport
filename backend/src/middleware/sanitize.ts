@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import sanitizeHtml from "sanitize-html";
 import { BlockList, isIP } from "node:net";
 import { logger } from "../logger.js";
+import { validatePublicUrl } from "../utils/url-validator.js";
 
 const PRIVATE_IP_RANGES = new BlockList();
 PRIVATE_IP_RANGES.addSubnet("0.0.0.0", 8, "ipv4");
@@ -401,11 +402,11 @@ export function sanitizeObject(
   return { result: obj, changed: false, violations: allViolations };
 }
 
-export function sanitizeBody(
+export async function sanitizeBody(
   req: Request,
   _res: Response,
   next: NextFunction,
-): void {
+): Promise<void> {
   if (req.body && typeof req.body === "object") {
     const { result, changed, violations } = sanitizeObject(
       req.body as Record<string, unknown>,
@@ -423,6 +424,32 @@ export function sanitizeBody(
       );
       req.body = result;
     }
+
+    const urlChecks: Array<{ parent: Record<string, unknown>; key: string; value: string }> = [];
+    const collectUrls = (value: unknown): void => {
+      if (!value || typeof value !== "object") return;
+      if (Array.isArray(value)) {
+        value.forEach(collectUrls);
+        return;
+      }
+      for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+        if (typeof child === "string" && URL_FIELDS.has(key)) {
+          urlChecks.push({ parent: value as Record<string, unknown>, key, value: child });
+        } else {
+          collectUrls(child);
+        }
+      }
+    };
+    collectUrls(result);
+    for (const check of urlChecks) {
+      const violation = await validatePublicUrl(check.value);
+      if (violation) {
+        check.parent[check.key] = "";
+        violations.push(`${check.key}: ${violation}`);
+      }
+    }
+
+    req.body = result;
 
     // Log security violations separately for monitoring
     if (violations.length > 0) {

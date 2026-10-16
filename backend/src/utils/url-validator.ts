@@ -54,3 +54,19 @@ export async function validateWebhookUrl(url: string): Promise<string | null> {
     return "Invalid URL format";
   }
 }
+
+export async function validatePublicUrl(url: string): Promise<string | null> {
+  try {
+    const parsed = new URL(url);
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      return "Only HTTP and HTTPS URLs are allowed";
+    }
+    if (!parsed.hostname) return "Invalid URL hostname";
+    if (isPrivateIp(parsed.hostname)) return "Private IP addresses are not allowed";
+    const addresses = await resolveAsync(parsed.hostname);
+    if (addresses.some(isPrivateIp)) return "Hostname resolves to a private IP";
+    return null;
+  } catch {
+    return "URL hostname could not be resolved safely";
+  }
+}
