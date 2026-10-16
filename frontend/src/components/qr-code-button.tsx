@@ -14,6 +14,7 @@ type QRCodeButtonProps = {
 export function QRCodeButton({ username }: QRCodeButtonProps) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [downloadError, setDownloadError] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   const qrRef = useRef<HTMLDivElement>(null);
   const profileUrl = `${typeof window !== "undefined" ? window.location.origin : SITE_URL}/profile/${username}`;
@@ -46,6 +47,8 @@ export function QRCodeButton({ username }: QRCodeButtonProps) {
   }, [open]);
 
   const handleDownload = useCallback(() => {
+    setDownloadError(false);
+
     const svgEl = qrRef.current?.querySelector("svg");
     if (!svgEl) return;
 
@@ -53,6 +56,14 @@ export function QRCodeButton({ username }: QRCodeButtonProps) {
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+
+    let dataUri: string;
+    try {
+      dataUri = `data:image/svg+xml;base64,${btoa(svgData)}`;
+    } catch {
+      setDownloadError(true);
+      return;
+    }
 
     const img = new Image();
     img.onload = () => {
@@ -68,7 +79,10 @@ export function QRCodeButton({ username }: QRCodeButtonProps) {
       link.click();
       markShared();
     };
-    img.src = `data:image/svg+xml;base64,${btoa(svgData)}`;
+    img.onerror = () => {
+      setDownloadError(true);
+    };
+    img.src = dataUri;
   }, [username]);
 
   const handleCopyUrl = useCallback(async () => {
@@ -160,6 +174,11 @@ export function QRCodeButton({ username }: QRCodeButtonProps) {
                   {copied ? "Copied" : "Copy URL"}
                 </button>
               </div>
+              {downloadError && (
+                <p className="mt-2 text-center text-[10px] text-red-400">
+                  Download failed. Please try again.
+                </p>
+              )}
             </div>
           </FocusTrap>
         </>
