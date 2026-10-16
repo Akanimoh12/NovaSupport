@@ -85,6 +85,16 @@ export async function fetchGitHubProfile(
     if (remaining === "0") {
       throw new GitHubRateLimitError(response.headers.get("X-RateLimit-Reset"));
     }
+    // #1337 — GitHub secondary/abuse-detection rate limits return a 403 with no
+    // X-RateLimit-Remaining header at all. Classify these as rate-limit errors too,
+    // using the Retry-After header (seconds) for the retry timing when present.
+    if (response.status === 403 && remaining === null) {
+      const retryAfter = response.headers.get("Retry-After");
+      const resetTimestamp = retryAfter
+        ? String(Math.floor(Date.now() / 1000) + Number(retryAfter))
+        : null;
+      throw new GitHubRateLimitError(resetTimestamp);
+    }
     throw new GitHubFetchError(response.status);
   }
 

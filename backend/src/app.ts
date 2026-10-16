@@ -3101,6 +3101,59 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     return res.status(204).send();
   });
 
+  // #1335 — PATCH to toggle active flag and/or rotate signing secret
+  const patchWebhookSchema = z.object({
+    active: z.boolean().optional(),
+    rotateSecret: z.literal(true).optional(),
+  }).refine((d) => d.active !== undefined || d.rotateSecret === true, {
+    message: "At least one of 'active' or 'rotateSecret' is required",
+  });
+
+  v1Router.patch("/profiles/:username/webhooks/:id", requireAuth, writeLimiter, async (req, res) => {
+    const profile = await resolveProfileOwner(req.params.username as string, req.auth, res);
+    if (!profile) return;
+
+    const webhook = await prisma.webhook.findFirst({
+      where: { id: req.params.id as string, profileId: profile.id },
+    });
+    if (!webhook) return sendError(res, 404, "Webhook not found");
+
+    const parsed = patchWebhookSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return sendError(res, 400, parsed.error.errors[0]?.message ?? "Invalid request body");
+    }
+
+    const updateData: { active?: boolean; signingKey?: string; secretHash?: string } = {};
+    if (parsed.data.active !== undefined) {
+      updateData.active = parsed.data.active;
+    }
+
+    let newSecret: string | undefined;
+    if (parsed.data.rotateSecret === true) {
+      newSecret = randomBytes(32).toString("hex");
+      updateData.signingKey = newSecret;
+      updateData.secretHash = createHash("sha256").update(newSecret).digest("hex");
+    }
+
+    try {
+      const updated = await prisma.webhook.update({
+        where: { id: webhook.id },
+        data: updateData,
+        select: { id: true, url: true, active: true, createdAt: true },
+      });
+
+      req.log.info(
+        { webhookId: webhook.id, active: updated.active, secretRotated: !!newSecret },
+        "webhook updated",
+      );
+
+      return res.json({ ...updated, ...(newSecret ? { secret: newSecret } : {}) });
+    } catch (e: unknown) {
+      req.log.error({ err: e }, "database error updating webhook");
+      return sendError(res, 500, "Internal server error");
+    }
+  });
+
   v1Router.get("/profiles/:username/webhooks/:id/deliveries", requireAuth, async (req, res) => {
     const profile = await resolveProfileOwner(req.params.username as string, req.auth, res);
     if (!profile) return;
@@ -4152,6 +4205,70 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     }
   });
 
+  /**
+   * @openapi
+   * /profiles/{username}/badges/{badgeId}:
+   *   delete:
+   *     summary: Revoke a badge from a profile (admin only)
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: username
+   *         required: true
+   *         schema:
+   *           type: string
+   *       - in: path
+   *         name: badgeId
+   *         required: true
+   *         schema:
+   *           type: string
+   *         description: ID of the badge to revoke
+   *     responses:
+   *       204:
+   *         description: Badge revoked
+   *       403:
+   *         description: Admin access required
+   *       404:
+   *         description: Profile, badge, or assignment not found
+   *       500:
+   *         description: Internal server error
+   */
+  v1Router.delete("/profiles/:username/badges/:badgeId", requireAuth, async (req, res) => {
+    // Admin-only: only the configured admin wallet may revoke badges (#1336)
+    if (!ADMIN_WALLET) {
+      return sendError(res, 503, "Admin endpoint not configured");
+    }
+    if (!req.auth || req.auth.walletAddress !== ADMIN_WALLET) {
+      return sendError(res, 403, "Forbidden: Admin access required");
+    }
+
+    try {
+      const profile = await prisma.profile.findUnique({
+        where: { username: req.params.username as string },
+      });
+      if (!profile) return sendError(res, 404, "Profile not found");
+
+      const badge = await prisma.badge.findUnique({ where: { id: req.params.badgeId as string } });
+      if (!badge) return sendError(res, 404, "Badge not found");
+
+      const existing = await prisma.profileBadge.findUnique({
+        where: { profileId_badgeId: { profileId: profile.id, badgeId: badge.id } },
+      });
+      if (!existing) return sendError(res, 404, "Badge not assigned to this profile");
+
+      await prisma.profileBadge.delete({
+        where: { profileId_badgeId: { profileId: profile.id, badgeId: badge.id } },
+      });
+
+      req.log.info({ username: profile.username, badge: badge.name }, "badge revoked");
+      return res.status(204).send();
+    } catch (e: unknown) {
+      req.log.error({ err: e }, "database error revoking badge");
+      return sendError(res, 500, "Internal server error");
+    }
+  });
+
   // ── Webhooks Admin ─────────────────────────────────────────────────────
 
   /**
@@ -4895,7 +5012,14 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     });
 
     if (!subscription) return sendError(res, 404, "Recurring support not found");
-    if (subscription.supporterId !== user.id) return sendError(res, 403, "Forbidden");
+
+    // Allow access to the supporter who owns the subscription OR the profile owner,
+    // matching the authorization already granted by the list endpoint (#1334).
+    const isSupporter = subscription.supporterId === user.id;
+    const profile = subscription.profile as { username: string; displayName: string } & Record<string, unknown>;
+    const profileRecord = await prisma.profile.findUnique({ where: { username: profile.username } });
+    const isOwner = profileRecord ? isProfileOwner(req.auth, profileRecord) : false;
+    if (!isSupporter && !isOwner) return sendError(res, 403, "Forbidden");
 
     return res.json(subscription);
   });
