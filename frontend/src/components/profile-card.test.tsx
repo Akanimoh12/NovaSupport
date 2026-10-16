@@ -126,4 +126,24 @@ describe('ProfileCard', () => {
       expect(showToast).toHaveBeenCalledWith('Wallet address copied!', 'success');
     });
   });
+
+  it('renders QR code button in share section', () => {
+    render(<ProfileCard {...mockProfile} />);
+
+    const qrButton = screen.getByRole('button', { name: /show qr code/i });
+    expect(qrButton).toBeInTheDocument();
+    expect(qrButton.textContent).toContain('QR Code');
+  });
+
+  it('shows QR modal when QR code button is clicked', async () => {
+    const { container } = render(<ProfileCard {...mockProfile} />);
+
+    const qrButton = screen.getByRole('button', { name: /show qr code/i });
+    fireEvent.click(qrButton);
+
+    await waitFor(() => {
+      const modal = container.querySelector('[class*="fixed"][class*="inset-0"]');
+      expect(modal).toBeInTheDocument();
+    });
+  });
 });
