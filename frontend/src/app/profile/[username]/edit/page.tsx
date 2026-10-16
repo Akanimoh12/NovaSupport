@@ -152,6 +152,11 @@ export default function EditProfilePage() {
     const code = newAssetCode.trim().toUpperCase();
     if (!code) { setAssetError("Asset code is required."); return; }
     if (!/^[A-Z0-9]{1,12}$/.test(code)) { setAssetError("Invalid asset code."); return; }
+    const issuerToAdd = newAssetIssuer.trim();
+    if (code !== "XLM" && !issuerToAdd) {
+      setAssetError(`Issuer required for ${code} — please enter the Stellar issuer address.`);
+      return;
+    }
     // #812: compare both code AND issuer so creators can accept multiple
     // issuers of the same asset code (e.g. Circle USDC vs another USDC).
     const issuerToAdd = newAssetIssuer.trim();

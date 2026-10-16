@@ -115,6 +115,10 @@ function truncateAddress(address: string): string {
 function normalizeAssetTotals(
   totals: SupporterData["totalByAsset"],
 ): AssetTotal[] {
+  if (totals == null) {
+    return [];
+  }
+
   if (Array.isArray(totals)) {
     return totals;
   }
@@ -174,19 +178,21 @@ export default async function SupporterPage({ params }: PageProps) {
   const transactions = data.transactions ?? data.recentTransactions ?? [];
   const supportedProfiles =
     data.supportedProfiles ??
-    Array.from(
-      transactions
-        .reduce((profiles, tx) => {
-          const existing = profiles.get(tx.profileUsername);
-          profiles.set(tx.profileUsername, {
-            username: tx.profileUsername,
-            displayName: tx.profileDisplayName,
-            totalTransactions: (existing?.totalTransactions ?? 0) + 1,
-          });
-          return profiles;
-        }, new Map<string, SupportedProfile>())
-        .values(),
-    );
+    (data.transactions
+      ? Array.from(
+          data.transactions
+            .reduce((profiles, tx) => {
+              const existing = profiles.get(tx.profileUsername);
+              profiles.set(tx.profileUsername, {
+                username: tx.profileUsername,
+                displayName: tx.profileDisplayName,
+                totalTransactions: (existing?.totalTransactions ?? 0) + 1,
+              });
+              return profiles;
+            }, new Map<string, SupportedProfile>())
+            .values(),
+        )
+      : []);
   const shareUrl = `/supporters/${address}`;
   const shareHref = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
     `View this NovaSupport supporter profile: ${shareUrl}`,
