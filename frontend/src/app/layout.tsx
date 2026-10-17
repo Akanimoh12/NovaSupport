@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import { SITE_URL } from "@/lib/config";
 import { Providers } from "./providers";
@@ -9,9 +9,8 @@ export const metadata: Metadata = {
   title: "NovaSupport",
   description:
     "Stellar-native support profiles for maintainers, creators, and developers.",
-  // #774: PWA manifest and theme color
+  // #774: PWA manifest (theme color lives in the viewport export below)
   manifest: "/manifest.json",
-  themeColor: "#00e5be",
   openGraph: {
     title: "NovaSupport",
     description:
@@ -26,6 +25,11 @@ export const metadata: Metadata = {
     description:
       "Stellar-native support profiles for maintainers, creators, and developers.",
   },
+};
+
+// #1326: themeColor belongs in the viewport export, not metadata (Next.js 14+).
+export const viewport: Viewport = {
+  themeColor: "#00e5be",
 };
 
 export default function RootLayout({

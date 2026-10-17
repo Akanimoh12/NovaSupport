@@ -133,7 +133,7 @@ export default function DashboardPage() {
 
         const [statsRes, milestonesRes, webhooksRes, profileRes] = await Promise.all([
           apiFetch(`${API_BASE_URL}/profiles/${resolvedUsername}/stats`),
-          apiFetch(`${API_BASE_URL}/profiles/${resolvedUsername}/milestones`),
+          apiFetch(`${API_BASE_URL}/profiles/${resolvedUsername}/milestones?limit=100`),
           apiFetch(`${API_BASE_URL}/profiles/${resolvedUsername}/webhooks`),
           apiFetch(`${API_BASE_URL}/profiles/${resolvedUsername}`),
         ]);
