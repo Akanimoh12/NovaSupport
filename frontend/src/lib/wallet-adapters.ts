@@ -46,7 +46,8 @@ export function mapWalletError(error: unknown): string {
       case "SIGNING_DENIED":
         return "You declined the transaction in your wallet.";
       case "NOT_FOUND":
-        return `${error.message}. Please install a Stellar wallet extension.`;
+        const baseMessage = error.message.endsWith(".") ? error.message.slice(0, -1) : error.message;
+        return `${baseMessage}. Please install a Stellar wallet extension.`;
       case "CONNECTION_DENIED":
         return "Wallet access was not granted. Please allow the site and try again.";
       case "SIGNING_FAILED":
