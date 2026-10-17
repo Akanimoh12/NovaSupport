@@ -83,7 +83,7 @@ export default function DashboardPage() {
     title: "",
     description: "",
     targetAmount: "",
-    assetCode: "XLM",
+    assetCode: "",
     assetIssuer: null,
   });
   const [acceptedAssets, setAcceptedAssets] = useState<AcceptedAsset[]>([]);
@@ -111,6 +111,18 @@ export default function DashboardPage() {
     totalTransactions: "—",
     totalTransactionsPositive: true,
   });
+
+  // When accepted assets load, seed the form default to the first accepted
+  // asset so the milestone dropdown never starts on an asset the creator
+  // doesn't actually accept (#1293).
+  useEffect(() => {
+    if (acceptedAssets.length === 0) return;
+    setFormData((prev) => {
+      if (prev.assetCode !== "") return prev;
+      const first = acceptedAssets[0];
+      return { ...prev, assetCode: first.code, assetIssuer: first.issuer ?? null };
+    });
+  }, [acceptedAssets]);
 
   useEffect(() => {
     async function loadDashboard() {
@@ -290,7 +302,8 @@ export default function DashboardPage() {
         setMilestones([newMilestone, ...milestones]);
       }
 
-      setFormData({ title: "", description: "", targetAmount: "", assetCode: "XLM", assetIssuer: null });
+      const defaultAsset = acceptedAssets[0] ?? { code: "XLM", issuer: null };
+      setFormData({ title: "", description: "", targetAmount: "", assetCode: defaultAsset.code, assetIssuer: defaultAsset.issuer ?? null });
       setShowMilestoneForm(false);
       setEditingMilestone(null);
     } catch (err: any) {
@@ -339,7 +352,8 @@ export default function DashboardPage() {
   const cancelForm = () => {
     setShowMilestoneForm(false);
     setEditingMilestone(null);
-    setFormData({ title: "", description: "", targetAmount: "", assetCode: "XLM", assetIssuer: null });
+    const defaultAsset = acceptedAssets[0] ?? { code: "XLM", issuer: null };
+    setFormData({ title: "", description: "", targetAmount: "", assetCode: defaultAsset.code, assetIssuer: defaultAsset.issuer ?? null });
   };
 
   const handleAddWebhook = async (e: React.FormEvent) => {
