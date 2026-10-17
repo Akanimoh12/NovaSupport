@@ -182,7 +182,7 @@ async function getStats(username: string): Promise<ProfileStats | null> {
 }
 
 async function getMilestones(username: string): Promise<Milestone[]> {
-  const res = await fetch(`${API_BASE_URL}/profiles/${username}/milestones`, {
+  const res = await fetch(`${API_BASE_URL}/profiles/${username}/milestones?limit=100`, {
     next: { revalidate: 60 },
   });
   if (!res.ok) return [];

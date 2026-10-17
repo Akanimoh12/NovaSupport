@@ -29,7 +29,11 @@ export const stellarConfig = {
 };
 
 
-export const horizonServer = new Horizon.Server(stellarConfig.horizonUrl);
+// #1327: the SDK throws on http:// URLs unless allowHttp is set, which would
+// crash at module load when pointing at a local quickstart Horizon instance.
+export const horizonServer = new Horizon.Server(stellarConfig.horizonUrl, {
+  allowHttp: stellarConfig.horizonUrl.startsWith("http://"),
+});
 
 export function isValidStellarAddress(address: string): boolean {
   return StrKey.isValidEd25519PublicKey(address);

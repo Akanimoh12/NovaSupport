@@ -77,7 +77,7 @@ function mockBackend(override: Override = () => undefined) {
     if (url === `${API}/profiles/alice/stats`) {
       return json({ totalEarned: 0, totalTransactions: 0, uniqueSupporters: 0, assetBreakdown: {} });
     }
-    if (url === `${API}/profiles/alice/milestones`) return json({ milestones: [milestone] });
+    if (url === `${API}/profiles/alice/milestones?limit=100`) return json({ milestones: [milestone] });
     if (url === `${API}/profiles/alice/webhooks`) return json({ webhooks: [webhook] });
     if (url === `${API}/profiles/alice`) return json({ acceptedAssets: [] });
     return json({});

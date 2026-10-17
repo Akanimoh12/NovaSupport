@@ -4406,7 +4406,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       .string()
       .regex(/^\d+(\.\d{1,7})?$/, "Must be a positive decimal with up to 7 places")
       .refine((v) => parseFloat(v) > 0, "Must be greater than zero"),
-    assetCode: z.string().default("XLM"),
+    assetCode: z.string().min(1).max(12).default("XLM"),
     assetIssuer: stellarAddress.optional().nullable(),
   });
 
@@ -4490,12 +4490,23 @@ All errors return JSON with an \`error\` field and optional \`code\`:
         return sendError(res, 404, "Profile not found");
       }
 
-      const milestones = await prisma.milestone.findMany({
-        where: { profileId: profile.id },
-        orderBy: { createdAt: "desc" },
-      });
+      const pagination = paginationSchema.safeParse(req.query);
+      if (!pagination.success) {
+        return sendError(res, 400, "Invalid pagination parameters", "INVALID_PAGINATION");
+      }
+      const { limit, offset } = pagination.data;
 
-      res.json({ milestones });
+      const [milestones, total] = await Promise.all([
+        prisma.milestone.findMany({
+          where: { profileId: profile.id },
+          orderBy: { createdAt: "desc" },
+          take: limit,
+          skip: offset,
+        }),
+        prisma.milestone.count({ where: { profileId: profile.id } }),
+      ]);
+
+      res.json({ milestones, total, limit, offset });
     } catch {
       return sendError(res, 500, "Internal server error");
     }
