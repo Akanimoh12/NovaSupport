@@ -393,21 +393,19 @@ export default function DashboardPage() {
     }
 
     setExpandedDeliveries(webhookId);
-    if (!deliveries[webhookId]) {
-      setDeliveriesLoading(webhookId);
-      try {
-        const res = await apiFetch(
-          `${API_BASE_URL}/profiles/${username}/webhooks/${webhookId}/deliveries`
-        );
-        if (res.ok) {
-          const data = await res.json();
-          setDeliveries((prev) => ({ ...prev, [webhookId]: data.deliveries || [] }));
-        }
-      } catch {
-        // silently fail
-      } finally {
-        setDeliveriesLoading(null);
+    setDeliveriesLoading(webhookId);
+    try {
+      const res = await apiFetch(
+        `${API_BASE_URL}/profiles/${username}/webhooks/${webhookId}/deliveries`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setDeliveries((prev) => ({ ...prev, [webhookId]: data.deliveries || [] }));
       }
+    } catch {
+      // silently fail
+    } finally {
+      setDeliveriesLoading(null);
     }
   };
 
@@ -436,6 +434,10 @@ export default function DashboardPage() {
       const res = await apiFetch(`${API_BASE_URL}/profiles/${username}/transactions/export`);
 
       if (!res.ok) {
+        const rateLimitInfo = parseRateLimitInfo(res);
+        if (rateLimitInfo) {
+          throw new Error(formatRateLimitedMessage(rateLimitInfo));
+        }
         throw new Error("Failed to download CSV");
       }
 

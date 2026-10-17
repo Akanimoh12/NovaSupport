@@ -54,17 +54,27 @@ function getPresetRange(preset: DatePreset): { from: Date | null; to: Date | nul
 // ── Highlight matching text ───────────────────────────────────────────────────
 function Highlight({ text, query }: { text: string; query: string }) {
   if (!query.trim()) return <>{text}</>;
-  const idx = text.toLowerCase().indexOf(query.toLowerCase());
-  if (idx === -1) return <>{text}</>;
-  return (
-    <>
-      {text.slice(0, idx)}
-      <mark className="bg-mint/30 text-white rounded px-0.5">
+  const lowerText = text.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  const parts: (string | React.ReactNode)[] = [];
+  let lastIdx = 0;
+  let idx = 0;
+
+  while ((idx = lowerText.indexOf(lowerQuery, lastIdx)) !== -1) {
+    parts.push(text.slice(lastIdx, idx));
+    parts.push(
+      <mark key={idx} className="bg-mint/30 text-white rounded px-0.5">
         {text.slice(idx, idx + query.length)}
       </mark>
-      {text.slice(idx + query.length)}
-    </>
-  );
+    );
+    lastIdx = idx + query.length;
+  }
+
+  if (lastIdx < text.length) {
+    parts.push(text.slice(lastIdx));
+  }
+
+  return <>{parts}</>;
 }
 
 export function ProfileTabs({ username }: { username: string }) {

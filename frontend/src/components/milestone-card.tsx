@@ -180,7 +180,7 @@ export function MilestoneCard({ milestone, index = 0 }: MilestoneCardProps) {
           </span>
 
           <motion.span
-            key={Math.round(progress)}
+            key={Math.round(progress * 100) / 100}
             initial={{ scale: 1.3 }}
             animate={{ scale: 1 }}
             className={cn(
@@ -189,7 +189,7 @@ export function MilestoneCard({ milestone, index = 0 }: MilestoneCardProps) {
             )}
           >
             {isReached && <Sparkles size={12} className="inline mr-1 text-gold" />}
-            {Math.round(progress)}%
+            {progress < 0.01 && progress > 0 ? progress.toFixed(4) : progress < 1 ? progress.toFixed(2) : Math.round(progress)}%
           </motion.span>
         </div>
       </div>
