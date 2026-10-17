@@ -75,7 +75,7 @@ function mockBackend(override: Override = () => undefined) {
     if (custom) return custom;
     if (url === `${API}/auth/me`) return json({ username: "alice" });
     if (url === `${API}/profiles/alice/stats`) {
-      return json({ totalEarned: 0, totalTransactions: 0, uniqueSupporters: 0, assetBreakdown: {} });
+      return json({ totalTransactions: 0, uniqueSupporters: 0, assetTotals: [] });
     }
     if (url === `${API}/profiles/alice/milestones?limit=100`) return json({ milestones: [milestone] });
     if (url === `${API}/profiles/alice/webhooks`) return json({ webhooks: [webhook] });
@@ -212,6 +212,80 @@ describe("DashboardPage", () => {
         expect(screen.getByRole("status")).toHaveTextContent("Failed to delete webhook");
       });
       expect(alertSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Total Earned asset label (#1285)", () => {
+    function totalEarnedValue() {
+      return screen.getByText("Total Earned").nextElementSibling;
+    }
+
+    it("labels a USDC-only creator's earnings as USDC", async () => {
+      mockBackend((url) =>
+        url === `${API}/profiles/alice/stats`
+          ? json({
+              totalTransactions: 2,
+              uniqueSupporters: 2,
+              assetTotals: [{ assetCode: "USDC", assetIssuer: "GISSUER", total: "25.5000000" }],
+            })
+          : undefined,
+      );
+      render(<DashboardPage />);
+
+      expect(await screen.findByText("Total Earned")).toBeInTheDocument();
+      expect(totalEarnedValue()).toHaveTextContent("25.5 USDC");
+      expect(totalEarnedValue()).not.toHaveTextContent("XLM");
+    });
+
+    it("uses the asset with the largest total", async () => {
+      mockBackend((url) =>
+        url === `${API}/profiles/alice/stats`
+          ? json({
+              totalTransactions: 3,
+              uniqueSupporters: 2,
+              assetTotals: [
+                { assetCode: "XLM", assetIssuer: null, total: "5.0000000" },
+                { assetCode: "AQUA", assetIssuer: "GISSUER", total: "40.0000000" },
+              ],
+            })
+          : undefined,
+      );
+      render(<DashboardPage />);
+
+      expect(await screen.findByText("Total Earned")).toBeInTheDocument();
+      expect(totalEarnedValue()).toHaveTextContent("45 AQUA");
+    });
+
+    it("falls back to XLM when there are no earnings yet", async () => {
+      mockBackend();
+      render(<DashboardPage />);
+
+      expect(await screen.findByText("Total Earned")).toBeInTheDocument();
+      expect(totalEarnedValue()).toHaveTextContent("0 XLM");
+    });
+  });
+
+  describe("load failure (#1287)", () => {
+    it("renders the captured error instead of an empty dashboard", async () => {
+      mockBackend((url) => {
+        if (url === `${API}/profiles/alice/stats`) throw new Error("Network request failed");
+        return undefined;
+      });
+      render(<DashboardPage />);
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent("Dashboard Unavailable");
+      expect(alert).toHaveTextContent("Network request failed");
+      expect(screen.queryByText("Funding Goals")).not.toBeInTheDocument();
+    });
+
+    it("shows the error even when the failure happens before the username resolves", async () => {
+      mockApiFetch.mockRejectedValue(new Error("Failed to fetch"));
+      render(<DashboardPage />);
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Failed to fetch");
+      expect(screen.queryByText("Redirecting...")).not.toBeInTheDocument();
+      expect(mockPush).not.toHaveBeenCalled();
     });
   });
 });

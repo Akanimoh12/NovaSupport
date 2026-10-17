@@ -80,6 +80,7 @@ export function WalletConnect({ onConnect }: WalletConnectProps = {}) {
       const pubkey = await adapter.connect();
       localStorage.setItem(STORAGE_KEY, pubkey);
       localStorage.setItem(STORAGE_WALLET_ID, walletId);
+      window.dispatchEvent(new Event("wallet-connected"));
       setAddress(pubkey);
       setActiveWallet(walletId);
       setStatus(`${adapter.name} connected`);

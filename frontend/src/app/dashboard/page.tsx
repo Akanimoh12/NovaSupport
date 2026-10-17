@@ -8,18 +8,19 @@ import { Toast } from "@/components/toast";
 import { OnboardingChecklist } from "@/components/onboarding-checklist";
 import { 
   TrendingUp, Users, Wallet, Activity, 
-  ArrowUpRight, ArrowDownRight, Plus, Edit2, Trash2, X, Link2, Eye, EyeOff, Copy, Check, ChevronDown, ChevronRight, Download
+  ArrowUpRight, ArrowDownRight, Plus, Edit2, Trash2, X, Link2, Eye, EyeOff, Copy, Check, ChevronDown, ChevronRight, Download, Info
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { formatRateLimitedMessage, parseRateLimitInfo } from "@/lib/rate-limit";
 import { apiFetch } from "@/lib/api-client";
 import { API_BASE_URL } from "@/lib/config";
+import { getDominantAssetCode } from "@/lib/assets";
 
+// Matches the GET /profiles/:username/stats response.
 interface Stats {
-  totalEarned: number;
   totalTransactions: number;
   uniqueSupporters: number;
-  assetBreakdown: Record<string, number>;
+  assetTotals: { assetCode: string; assetIssuer: string | null; total: string }[];
 }
 
 interface Milestone {
@@ -158,7 +159,7 @@ export default function DashboardPage() {
           setAcceptedAssets(profileData.acceptedAssets || []);
         }
       } catch (err: any) {
-        setError(err.message);
+        setError(err?.message || "Failed to load dashboard");
       } finally {
         setLoading(false);
       }
@@ -485,6 +486,25 @@ export default function DashboardPage() {
     );
   }
 
+  if (error) {
+    return (
+      <AppShell>
+        <div role="alert" className="flex h-[60vh] flex-col items-center justify-center gap-4">
+          <div className="rounded-full bg-red-500/10 p-4 text-red-500">
+            <Info size={48} />
+          </div>
+          <h2 className="text-2xl font-bold text-white">
+            Dashboard Unavailable
+          </h2>
+          <p className="text-steel">
+            We couldn&apos;t load your dashboard. Please try again.
+          </p>
+          <p className="text-xs text-red-400">{error}</p>
+        </div>
+      </AppShell>
+    );
+  }
+
   if (!username) {
     return (
       <AppShell>
@@ -526,6 +546,13 @@ export default function DashboardPage() {
       ? `${a.code} (${a.issuer.slice(0, 4)}…${a.issuer.slice(-4)})`
       : a.code;
 
+  // #1285: label the total with the asset actually earned, not a hardcoded XLM.
+  const assetAmounts = (stats?.assetTotals ?? []).map((a) => ({
+    assetCode: a.assetCode,
+    amount: Number(a.total) || 0,
+  }));
+  const totalEarned = assetAmounts.reduce((sum, a) => sum + a.amount, 0);
+
   return (
     <AppShell>
       <div className="mx-auto max-w-7xl space-y-8">
@@ -557,7 +584,7 @@ export default function DashboardPage() {
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
             <StatCard 
               title="Total Earned" 
-              value={`${stats.totalEarned.toLocaleString(undefined, { maximumFractionDigits: 2 })} XLM`}
+              value={`${totalEarned.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${getDominantAssetCode(assetAmounts)}`}
               icon={<Wallet className="text-mint" />}
               trend={trends.totalEarned}
               positive={trends.totalEarnedPositive}
