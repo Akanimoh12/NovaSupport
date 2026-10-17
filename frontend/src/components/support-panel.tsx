@@ -118,7 +118,6 @@ export function SupportPanel({
 
   const [visitorAddress, setVisitorAddress] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
-  const [assetCode, setAssetCode] = useState("XLM");
   const [balance, setBalance] = useState<string | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
   const [balanceError, setBalanceError] = useState<string | null>(null);
@@ -783,7 +782,7 @@ export function SupportPanel({
             <span>Network fee</span>
             <span className="tabular-nums">~{FEE_IN_XLM.toFixed(7)} XLM</span>
           </div>
-          {assetCode !== "XLM" && (
+          {paymentAsset.code !== "XLM" && (
             <p className="mt-1 text-[10px] text-steel/60">
               Path payments may incur slightly higher fees due to additional
               operations

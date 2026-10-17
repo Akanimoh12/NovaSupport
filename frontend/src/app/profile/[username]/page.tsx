@@ -36,15 +36,6 @@ type Profile = {
   emailVerified?: boolean;
 };
 
-type SupportTx = {
-  txHash: string;
-  amount: string;
-  assetCode: string;
-  message?: string | null;
-  createdAt: string;
-  supporterAddress: string | null;
-};
-
 type Milestone = {
   id: string;
   title: string;
@@ -125,16 +116,6 @@ export async function generateMetadata({
   };
 }
 
-async function getTransactions(username: string, limit = 10): Promise<SupportTx[]> {
-  const res = await fetch(
-    `${API_BASE_URL}/profiles/${username}/transactions?limit=${limit}`,
-    { next: { revalidate: 60 } },
-  );
-  if (!res.ok) return [];
-  const body = await res.json();
-  return body.transactions ?? [];
-}
-
 function truncateAddress(address: string): string {
   if (address.length <= 10) return address;
   return `${address.slice(0, 4)}...${address.slice(-4)}`;
@@ -201,10 +182,9 @@ async function getBadges(username: string): Promise<Badge[]> {
 }
 
 export default async function ProfilePage({ params }: PageProps) {
-  const [profile, transactions, leaderboard, stats, milestones, badges] =
+  const [profile, leaderboard, stats, milestones, badges] =
     await Promise.all([
       getProfile(params.username),
-      getTransactions(params.username, 10),
       getLeaderboard(params.username),
       getStats(params.username),
       getMilestones(params.username),
@@ -263,7 +243,9 @@ export default async function ProfilePage({ params }: PageProps) {
     <AppShell>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c"),
+        }}
       />
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-8 items-start animate-fade-in">
         <div className="space-y-12">
