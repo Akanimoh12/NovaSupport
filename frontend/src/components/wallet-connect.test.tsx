@@ -57,6 +57,25 @@ describe('WalletConnect', () => {
     expect(screen.getByText(/GAAAAA/)).toBeInTheDocument();
   });
 
+  it('dispatches wallet-connected after storing the address', async () => {
+    (isAllowed as any).mockResolvedValue({ isAllowed: true });
+    (getAddress as any).mockResolvedValue({ address: TEST_ADDRESS, error: null });
+    const storedAddresses: (string | null)[] = [];
+    const listener = () => storedAddresses.push(localStorage.getItem('walletAddress'));
+    window.addEventListener('wallet-connected', listener);
+
+    try {
+      render(<WalletConnect />);
+      fireEvent.click(screen.getByRole('button', { name: /freighter/i }));
+
+      await waitFor(() => {
+        expect(storedAddresses).toEqual([TEST_ADDRESS]);
+      });
+    } finally {
+      window.removeEventListener('wallet-connected', listener);
+    }
+  });
+
   it('persists connection across re-renders', async () => {
     localStorage.setItem('walletAddress', TEST_ADDRESS);
     localStorage.setItem('walletId', 'freighter');

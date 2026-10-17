@@ -8,6 +8,7 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { API_BASE_URL } from "@/lib/config";
 import { apiFetch } from "@/lib/api-client";
 import { getStoredWalletAddress } from "@/lib/wallet-adapters";
+import { getDominantAssetCode, type AssetAmount } from "@/lib/assets";
 import {
   AreaChart,
   Area,
@@ -229,22 +230,9 @@ function normalizeTimeseriesResponse(json: unknown): ChartPoint[] {
   });
 }
 
-type AssetBreakdownEntry = {
-  assetCode: string;
-  amount: number;
+type AssetBreakdownEntry = AssetAmount & {
   percentage: number;
 };
-
-function getDominantAssetCode(
-  entries: AssetBreakdownEntry[],
-  fallback = "XLM",
-): string {
-  return entries.reduce<AssetBreakdownEntry | null>(
-    (dominant, entry) =>
-      dominant === null || entry.amount > dominant.amount ? entry : dominant,
-    null,
-  )?.assetCode ?? fallback;
-}
 
 type RecurringDrip = {
   id: string;
@@ -369,9 +357,29 @@ export default function DashboardPage() {
     };
   }, [username, selectedPeriod]);
 
+  // Re-read the connected wallet whenever it changes so ownership updates
+  // without a reload (#1288). WalletConnect dispatches wallet-connected /
+  // wallet-disconnected in this tab; `storage` covers changes from other tabs.
   useEffect(() => {
-    const address = getStoredWalletAddress() ?? "";
-    setConnectedWallet(address);
+    function syncConnectedWallet() {
+      setConnectedWallet(getStoredWalletAddress() ?? "");
+    }
+
+    function handleStorage(event: StorageEvent) {
+      if (event.key === null || event.key === "walletAddress") {
+        syncConnectedWallet();
+      }
+    }
+
+    syncConnectedWallet();
+    window.addEventListener("wallet-connected", syncConnectedWallet);
+    window.addEventListener("wallet-disconnected", syncConnectedWallet);
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener("wallet-connected", syncConnectedWallet);
+      window.removeEventListener("wallet-disconnected", syncConnectedWallet);
+      window.removeEventListener("storage", handleStorage);
+    };
   }, []);
 
   // Fetch two consecutive 30-day periods and compute period-over-period trends (#517)
