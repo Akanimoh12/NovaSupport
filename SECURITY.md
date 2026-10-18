@@ -53,7 +53,7 @@ A useful report includes:
 
 - Authentication and authorisation bypasses in the backend API
 - JWT handling weaknesses (`backend/src/auth.ts`)
-- Stellar transaction verification bypasses (`backend/src/verify-transaction.ts`)
+- Stellar transaction verification bypasses (`backend/src/services/verify-transaction.ts`)
 - Input validation issues that could lead to SQL injection, XSS, or data corruption
 - Exposed secrets or credentials in source code or CI configuration
 - CORS misconfiguration that allows unintended cross-origin access
