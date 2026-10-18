@@ -16,8 +16,8 @@ changes to the contract.
   Zero-value and negative-value calls are rejected at the contract level.
 
 - **Persistent support count.** `SupportCount` is stored in persistent storage and survives
-  ledger closings. The SDK automatically manages the entry TTL on writes; entries will not
-  silently disappear between calls within their TTL window.
+  ledger closings. The contract explicitly calls `extend_ttl()` after every write to ensure
+  entries remain live; entries will not silently disappear between calls within their TTL window.
 
 - **Structured event emission.** Every successful call emits a `SupportEvent` containing
   `supporter`, `recipient`, `amount`, `asset_code`, and `message` under the topic `"support"`.
@@ -90,8 +90,9 @@ Keep the old contract ID in release notes and monitoring so historical events re
 - **Extend TTL on persistent storage writes.** If you add new persistent storage entries,
   call `env.storage().persistent().extend_ttl(key, threshold, extend_to)` after each write,
   or entries will expire and silently return `None` on the next read. The current contract
-  relies on the SDK's automatic bump on `set()` — verify this behaviour holds for any new
-  entry type you introduce.
+  explicitly calls `extend_ttl()` immediately after every `set()` — this is intentional and
+  required. You must do the same for any new entry type you introduce; there is no automatic
+  TTL extension on write.
 
 - **Avoid storing unbounded data in persistent storage at scale.** Storing full message
   strings per supporter would make storage costs grow linearly with usage. Use events
