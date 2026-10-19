@@ -44,7 +44,7 @@ export async function sendWeeklyDigests(
           prismaClient.supportTransaction.findMany({
             where: {
               profileId: profile.id,
-              status: { not: "failed" },
+              status: "SUCCESS",
               createdAt: { gte: sevenDaysAgo },
             },
             orderBy: { createdAt: "desc" },
@@ -53,7 +53,7 @@ export async function sendWeeklyDigests(
             where: {
               profileId: profile.id,
               supporterAddress: { not: null },
-              status: { not: "failed" },
+              status: "SUCCESS",
               createdAt: { gte: sevenDaysAgo },
             },
             distinct: ["supporterAddress"],
@@ -70,7 +70,7 @@ export async function sendWeeklyDigests(
             by: ["assetCode"],
             where: {
               profileId: profile.id,
-              status: { not: "failed" },
+              status: "SUCCESS",
               createdAt: { gte: sevenDaysAgo },
             },
             _sum: { amount: true },

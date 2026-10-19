@@ -182,7 +182,7 @@ test("sweepBadges re-checks every profile with support activity", async () => {
   assert.equal(findMany.mock.calls.length, 1);
 });
 
-test("sweepBadges only considers profiles with a non-failed support transaction", async () => {
+test("sweepBadges only considers profiles with a SUCCESS support transaction", async () => {
   const { prismaClient, findMany } = buildSweepPrismaMock([[]]);
 
   await sweepBadges(prismaClient as never, mock.fn(() => Promise.resolve()) as never);
@@ -190,7 +190,7 @@ test("sweepBadges only considers profiles with a non-failed support transaction"
   const [args] = findMany.mock.calls[0]!.arguments as unknown as [
     { where: { supportTransactions: { some: { status: { not: string } } } } },
   ];
-  assert.deepEqual(args.where.supportTransactions.some.status, { not: "failed" });
+  assert.equal(args.where.supportTransactions.some.status, "SUCCESS");
 });
 
 test("sweepBadges pages through profiles using a cursor when a batch is full", async () => {

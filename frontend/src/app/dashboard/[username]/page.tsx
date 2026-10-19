@@ -230,10 +230,6 @@ function normalizeTimeseriesResponse(json: unknown): ChartPoint[] {
   });
 }
 
-type AssetBreakdownEntry = AssetAmount & {
-  percentage: number;
-};
-
 type RecurringDrip = {
   id: string;
   profileId?: string;
@@ -253,7 +249,7 @@ export default function DashboardPage() {
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [settings, setSettings] = useState<ProfileSettings | null>(null);
   const [chartData, setChartData] = useState<ChartPoint[]>([]);
-  const [assetBreakdown, setAssetBreakdown] = useState<AssetBreakdownEntry[]>(
+  const [assetBreakdown, setAssetBreakdown] = useState<AssetAmount[]>(
     [],
   );
   const [selectedPeriod, setSelectedPeriod] = useState<ChartRange>("30D");
@@ -305,8 +301,7 @@ export default function DashboardPage() {
 
         if (assetsRes.ok) {
           const assetsJson = (await assetsRes.json()) as {
-            breakdown: AssetBreakdownEntry[];
-            total: number;
+            breakdown: AssetAmount[];
           };
           setAssetBreakdown(assetsJson.breakdown ?? []);
         }
@@ -871,8 +866,8 @@ export default function DashboardPage() {
                         dataKey="amount"
                         nameKey="assetCode"
                         label={(props) => {
-                          const entry = props as unknown as AssetBreakdownEntry;
-                          return `${entry.assetCode} ${entry.percentage}%`;
+                          const entry = props as unknown as AssetAmount;
+                          return entry.assetCode;
                         }}
                         labelLine={false}
                       >
