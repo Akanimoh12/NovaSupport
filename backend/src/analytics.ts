@@ -58,11 +58,12 @@ export async function getAnalytics(
         WHERE "profileId" = ${profileId}
           AND "createdAt" >= ${start}
           AND "createdAt" <= ${end}
+          AND "status" = 'SUCCESS'
         GROUP BY 1
         ORDER BY 1 ASC
       `,
       prisma.supportTransaction.aggregate({
-        where: { profileId, createdAt: { gte: start, lte: end } },
+        where: { profileId, status: "SUCCESS", createdAt: { gte: start, lte: end } },
         _sum: { amount: true },
         _count: true,
       }),
@@ -72,10 +73,11 @@ export async function getAnalytics(
         WHERE "profileId" = ${profileId}
           AND "createdAt" >= ${start}
           AND "createdAt" <= ${end}
+          AND "status" = 'SUCCESS'
       `,
       prisma.supportTransaction.groupBy({
         by: ["assetCode"],
-        where: { profileId, createdAt: { gte: start, lte: end } },
+        where: { profileId, status: "SUCCESS", createdAt: { gte: start, lte: end } },
         _sum: { amount: true },
         _count: true,
       }),

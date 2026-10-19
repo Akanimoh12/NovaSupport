@@ -34,16 +34,16 @@ export async function checkAndAwardBadges(profileId: string, prismaClient = pris
 
       const [txCount, uniqueSupporters, totalsByAsset, milestonesReached] = await Promise.all([
         tx.supportTransaction.count({
-          where: { profileId, status: { not: "failed" } },
+          where: { profileId, status: "SUCCESS" },
         }),
         tx.supportTransaction.findMany({
-          where: { profileId, supporterAddress: { not: null }, status: { not: "failed" } },
+          where: { profileId, supporterAddress: { not: null }, status: "SUCCESS" },
           distinct: ["supporterAddress"],
           select: { supporterAddress: true },
         }),
         tx.supportTransaction.groupBy({
           by: ["assetCode", "assetIssuer"],
-          where: { profileId, status: { not: "failed" } },
+          where: { profileId, status: "SUCCESS" },
           _sum: { amount: true },
         }),
         tx.milestone.count({
@@ -132,7 +132,7 @@ export async function sweepBadges(
 
   do {
     const profiles = await prismaClient.profile.findMany({
-      where: { supportTransactions: { some: { status: { not: "failed" } } } },
+      where: { supportTransactions: { some: { status: "SUCCESS" } } },
       select: { id: true },
       take: BADGE_SWEEP_BATCH_SIZE,
       orderBy: { id: "asc" },

@@ -1664,7 +1664,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       }
 
       const profileId = profile.id;
-      const where = { profileId, status: { not: "failed" } };
+      const where = { profileId, status: "SUCCESS" };
 
       const [uniqueSupportersList, assetGroups, aggregates] = await Promise.all([
         prisma.supportTransaction.findMany({
@@ -2632,7 +2632,8 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       .refine(v => parseFloat(v) > 0, "amount must be greater than zero"),
     assetCode: z.string().min(1).max(12),
     assetIssuer: stellarAddress.optional().nullable(),
-    status: z.enum(["pending", "SUCCESS", "failed"]).default("pending"),
+    // No client-supplied status: the stored status is set server-side from the
+    // Horizon verification result (#1339), so any `status` in the body is ignored
     message: z.string().max(280).optional().nullable(),
     memo: z
       .string()
@@ -3228,7 +3229,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     const rows: any[] = await prisma.$queryRawUnsafe(
       `SELECT "supporterAddress", "assetCode", SUM(amount) as total_amount, COUNT(*) as transaction_count
        FROM "SupportTransaction"
-       WHERE "profileId" = $1 AND "status" != 'failed' AND "supporterAddress" IS NOT NULL
+       WHERE "profileId" = $1 AND "status" = 'SUCCESS' AND "supporterAddress" IS NOT NULL
        GROUP BY "supporterAddress", "assetCode"
        ${orderClause}
        LIMIT $2 OFFSET $3`,
@@ -3241,7 +3242,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       `SELECT COUNT(*) as total FROM (
          SELECT 1
          FROM "SupportTransaction"
-         WHERE "profileId" = $1 AND "status" != 'failed' AND "supporterAddress" IS NOT NULL
+         WHERE "profileId" = $1 AND "status" = 'SUCCESS' AND "supporterAddress" IS NOT NULL
          GROUP BY "supporterAddress", "assetCode"
        ) sub`,
       profile.id
@@ -3341,10 +3342,6 @@ All errors return JSON with an \`error\` field and optional \`code\`:
    *                 type: string
    *                 nullable: true
    *                 example: GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3THOJ2E37CEGOEZWDSP
-   *               status:
-   *                 type: string
-   *                 default: pending
-   *                 example: SUCCESS
    *               message:
    *                 type: string
    *                 maxLength: 280
@@ -3528,8 +3525,9 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       let supportRecord;
       try {
         supportRecord = await prisma.$transaction(async (tx: any) => {
+          // Only reached when verification === true, so the payment is confirmed on-chain
           const record = await tx.supportTransaction.create({
-            data: parsed.data,
+            data: { ...parsed.data, status: "SUCCESS" },
           });
 
           if (parsed.data.recurringSupportExecutionId) {
@@ -3898,10 +3896,14 @@ All errors return JSON with an \`error\` field and optional \`code\`:
    *     responses:
    *       200:
    *         description: Analytics data or CSV export
+   *       401:
+   *         description: Unauthorized - authentication required
+   *       403:
+   *         description: Forbidden - not the profile owner
    *       404:
    *         description: Analytics not found
    */
-  v1Router.get("/analytics/:username", async (req, res) => {
+  v1Router.get("/analytics/:username", requireAuth, exportLimiter, async (req, res) => {
     const pagination = paginationSchema.safeParse(req.query);
     if (!pagination.success) {
       return sendError(res, 400, "Invalid pagination parameters", "INVALID_PAGINATION");
@@ -3919,6 +3921,11 @@ All errors return JSON with an \`error\` field and optional \`code\`:
 
     if (!profile) {
       return sendError(res, 404, "Profile not found");
+    }
+
+    // Donor-level data (supporter addresses, messages, tx hashes) is owner-only
+    if (!isProfileOwner(req.auth, profile)) {
+      return sendError(res, 403, "Forbidden: You do not own this profile");
     }
 
     try {
@@ -5153,6 +5160,8 @@ All errors return JSON with an \`error\` field and optional \`code\`:
    *         description: Forbidden - not the profile owner
    *       404:
    *         description: Profile not found
+   *       409:
+   *         description: Profile has support transaction history and cannot be deleted
    */
   v1Router.delete("/profiles/:username", requireAuth, writeLimiter, async (req, res) => {
     try {
@@ -5213,6 +5222,17 @@ All errors return JSON with an \`error\` field and optional \`code\`:
 
       return res.status(204).send();
     } catch (error) {
+      // SupportTransaction.profile is onDelete: Restrict, so a profile that has
+      // ever received support cannot be removed (P2003 foreign key violation)
+      if (error && typeof error === "object" && "code" in error && error.code === "P2003") {
+        req.log.warn({ err: error }, "Profile deletion blocked by transaction history");
+        return sendError(
+          res,
+          409,
+          "This profile has support transaction history, which must be retained, so it cannot be deleted. Contact support if you need the profile removed.",
+          "PROFILE_HAS_TRANSACTIONS",
+        );
+      }
       req.log.error({ err: error }, "Error deleting profile");
       return sendError(res, 500, "Failed to delete profile");
     }
@@ -5263,7 +5283,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
             COUNT(*) as "txCount"
           FROM "SupportTransaction"
           WHERE "profileId" = ${profile.id}
-            AND "status" != 'failed'
+            AND "status" = 'SUCCESS'
             AND "createdAt" >= ${from}
             AND "createdAt" <= ${to}
             ${assetCode ? Prisma.sql`AND "assetCode" = ${assetCode}` : Prisma.empty}
@@ -5278,7 +5298,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
             COUNT(*) as "txCount"
           FROM "SupportTransaction"
           WHERE "profileId" = ${profile.id}
-            AND "status" != 'failed'
+            AND "status" = 'SUCCESS'
             AND "createdAt" >= ${from}
             AND "createdAt" <= ${to}
             ${assetCode ? Prisma.sql`AND "assetCode" = ${assetCode}` : Prisma.empty}
@@ -5293,7 +5313,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
             COUNT(*) as "txCount"
           FROM "SupportTransaction"
           WHERE "profileId" = ${profile.id}
-            AND "status" != 'failed'
+            AND "status" = 'SUCCESS'
             AND "createdAt" >= ${from}
             AND "createdAt" <= ${to}
             ${assetCode ? Prisma.sql`AND "assetCode" = ${assetCode}` : Prisma.empty}
@@ -5324,18 +5344,14 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       _sum: { amount: true },
     });
 
+    // Amounts are only meaningful within their own asset code, so no cross-asset
+    // total or percentage is returned (#1342)
     const breakdown = rows.map((row) => ({
       assetCode: row.assetCode,
       amount: Number(Number(row._sum.amount ?? 0).toFixed(7)),
-      percentage: 0,
     }));
 
-    const total = breakdown.reduce((sum, b) => sum + b.amount, 0);
-    for (const b of breakdown) {
-      b.percentage = total > 0 ? Number(((b.amount / total) * 100).toFixed(2)) : 0;
-    }
-
-    return res.json({ breakdown, total: Number(total.toFixed(7)) });
+    return res.json({ breakdown });
   });
 
   // ── Stellar Federation endpoint ───────────────────────────────────────
