@@ -253,7 +253,7 @@ describe("DashboardPage", () => {
       render(<DashboardPage />);
 
       expect(await screen.findByText("Total Earned")).toBeInTheDocument();
-      expect(totalEarnedValue()).toHaveTextContent("45 AQUA");
+      expect(totalEarnedValue()).toHaveTextContent("40 AQUA");
     });
 
     it("falls back to XLM when there are no earnings yet", async () => {

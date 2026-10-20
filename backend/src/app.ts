@@ -3976,7 +3976,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
       const [analytics, recentTransactions] = await Promise.all([
         getAnalytics(profile.id, start, end, "json"),
         prisma.supportTransaction.findMany({
-          where: { profileId: profile.id },
+          where: { profileId: profile.id, status: "SUCCESS" },
           orderBy: { createdAt: "desc" },
           take: 10,
           select: {

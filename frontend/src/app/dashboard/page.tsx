@@ -448,7 +448,7 @@ export default function DashboardPage() {
       const res = await apiFetch(`${API_BASE_URL}/profiles/${username}/transactions/export`);
 
       if (!res.ok) {
-        const rateLimitInfo = parseRateLimitInfo(res);
+        const rateLimitInfo = parseRateLimitInfo(res.headers);
         if (rateLimitInfo) {
           throw new Error(formatRateLimitedMessage(rateLimitInfo));
         }
@@ -567,7 +567,8 @@ export default function DashboardPage() {
     assetCode: a.assetCode,
     amount: Number(a.total) || 0,
   }));
-  const totalEarned = assetAmounts.reduce((sum, a) => sum + a.amount, 0);
+  const dominantAsset = assetAmounts.length > 0 ? assetAmounts.reduce((max, a) => a.amount > max.amount ? a : max) : null;
+  const totalEarned = dominantAsset?.amount ?? 0;
 
   return (
     <AppShell>
@@ -598,9 +599,9 @@ export default function DashboardPage() {
         {/* Summary Cards */}
         {stats && (
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            <StatCard 
-              title="Total Earned" 
-              value={`${totalEarned.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${getDominantAssetCode(assetAmounts)}`}
+            <StatCard
+              title="Total Earned"
+              value={`${totalEarned.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${dominantAsset?.assetCode ?? 'XLM'}`}
               icon={<Wallet className="text-mint" />}
               trend={trends.totalEarned}
               positive={trends.totalEarnedPositive}

@@ -49,7 +49,7 @@ Before you begin, ensure you have:
 
 - **Node.js 22+** and npm
 - **Rust** and Cargo (for Soroban contract)
-- **Soroban CLI** - Install: `cargo install --locked soroban-cli`
+- **Stellar CLI** - Install: `cargo install --locked stellar-cli --features opt`
 - **PostgreSQL** database (or Supabase account)
 - **Freighter wallet** browser extension - [Install here](https://freighter.app)
 - **Git** for cloning the repository
